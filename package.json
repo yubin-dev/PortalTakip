@@ -1,0 +1,13 @@
+{
+  "name": "portaltakip",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Yerel ağda GİB ve SGK hesap erişimini koordine edecek PortalTakip projesi",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
