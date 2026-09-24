@@ -76,13 +76,16 @@ function prepareDirectory(path) {
   securePersistentPath(dirname(path));
 }
 
-export function writeSetupKey(path, token) {
+export function writeSetupKey(path, token, {replace = false} = {}) {
   prepareDirectory(path);
   const keyPath = setupKeyPath(path);
   const temporary = `${keyPath}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, token + '\n', {flag: 'wx', mode: 0o600});
     // The directory DACL protects the temporary file before it is renamed.
+    if (!replace && existsSync(keyPath)) {
+      throw Object.assign(new Error('Kurulum anahtarı zaten var.'), {code: 'EEXIST'});
+    }
     renameSync(temporary, keyPath);
     securePersistentPath(keyPath);
   } finally {
@@ -99,6 +102,12 @@ export function discardSetupKey(path) {
 
 export function newSecret() {
   return randomBytes(32).toString('base64url');
+}
+
+// 120 random bits remain unguessable under the setup endpoint's rate limit and
+// are short enough to type from the elevated Windows dialog.
+export function newSetupCode() {
+  return randomBytes(15).toString('base64url');
 }
 
 export function digest(secret) {
@@ -131,7 +140,7 @@ export function verifyPassword(password, stored) {
 }
 
 export function createPendingConfig(path = defaultConfigPath) {
-  const setupToken = newSecret();
+  const setupToken = newSetupCode();
   const config = {version: 2, state: 'pending', setupTokenHash: digest(setupToken)};
   prepareDirectory(path);
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n', {flag: 'wx', mode: 0o600});
@@ -151,10 +160,10 @@ export function migrateLegacyConfig(source, target = defaultConfigPath) {
 export function rotateSetupKey(path = defaultConfigPath) {
   const config = readConfig(path);
   if (config.state !== 'pending') throw new Error('İlk kurulum tamamlandı; kurulum anahtarı artık geçerli değil.');
-  const token = newSecret();
+  const token = newSetupCode();
   // Write the protected secret first, then make its hash current. On failure,
   // the operation can safely be retried without deleting the configuration.
-  const keyPath = writeSetupKey(path, token);
+  const keyPath = writeSetupKey(path, token, {replace: true});
   saveConfig(path, {...config, setupTokenHash: digest(token)});
   return keyPath;
 }
@@ -162,10 +171,20 @@ export function rotateSetupKey(path = defaultConfigPath) {
 export function completeSetup(organizationName, adminPassword) {
   const organizationCode = newSecret();
   return {organizationCode, config: {
-    version: 2, state: 'ready', organizationId: randomUUID(),
+    version: 4, state: 'ready', organizationId: randomUUID(),
     organizationName, organizationCodeHash: digest(organizationCode),
-    adminPasswordHash: hashPassword(adminPassword), staff: [],
+    adminPasswordHash: hashPassword(adminPassword), staff: [], invitations: [], devices: [],
+    accounts: [], legacyAllowed: false,
   }};
+}
+
+export function upgradeAuthConfig(config) {
+  if (config.state === 'pending') return config;
+  if (config.version === 4) return config;
+  return {...config, version: 4, state: 'ready',
+    organizationName: config.organizationName ?? 'Kurum',
+    invitations: config.invitations ?? [], devices: config.devices ?? [],
+    accounts: [], legacyAllowed: true};
 }
 
 export function createInitialConfig(path = defaultConfigPath) {
@@ -195,11 +214,23 @@ export function readConfig(path = defaultConfigPath) {
   const config = JSON.parse(contents);
   if (config.version === 2 && config.state === 'pending' &&
       /^[a-f0-9]{64}$/.test(config.setupTokenHash)) return config;
-  if (!((config.version === 1) || (config.version === 2 && config.state === 'ready')) ||
+  if (!((config.version === 1) ||
+      ([2, 3, 4].includes(config.version) && config.state === 'ready')) ||
       typeof config.organizationId !== 'string' ||
       !/^[a-f0-9]{64}$/.test(config.organizationCodeHash) ||
       typeof config.adminPasswordHash !== 'string' ||
-      !Array.isArray(config.staff)) {
+      !Array.isArray(config.staff) ||
+      (config.version >= 3 && (!Array.isArray(config.invitations) ||
+        !Array.isArray(config.devices))) ||
+      (config.version === 4 && (!Array.isArray(config.accounts) ||
+        typeof config.legacyAllowed !== 'boolean' ||
+        !config.accounts.every((entry) => entry && typeof entry.id === 'string' &&
+          ['GİB', 'SGK'].includes(entry.portal) && typeof entry.label === 'string' &&
+          entry.label.length > 0 && entry.label.length <= 60 &&
+          typeof entry.code === 'string' &&
+          /^(?=.*[A-Za-z_-])[A-Za-z0-9_-]{16,128}$/.test(entry.code) &&
+          Array.isArray(entry.assignedUserIds) &&
+          entry.assignedUserIds.every((id) => typeof id === 'string'))))) {
     throw new Error('Invalid Hub configuration');
   }
   return config;

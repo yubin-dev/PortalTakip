@@ -1,7 +1,10 @@
 import {existsSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
+import {isSea} from 'node:sea';
 import {configuredPath, createPendingConfig, migrateLegacyConfig, rotateSetupKey,
-  securePersistentPath, setupKeyPath, writeSetupKey} from './config.js';
+  readConfig, securePersistentPath, setupKeyPath, writeSetupKey} from './config.js';
+import {dryRunInstaller, installFromDesktop, launchDesktop,
+  readInstallerAsset} from './desktop.js';
 import {startHub} from './server.js';
 
 function option(name) {
@@ -20,7 +23,18 @@ function port(name, cliName, fallback) {
 }
 
 async function main() {
+  if (isSea() && process.argv.length === 1) { await launchDesktop(); return; }
+  if (process.argv.includes('--desktop-install')) { installFromDesktop(); return; }
+  if (process.argv.includes('--desktop-check-assets')) {
+    if (!readInstallerAsset().includes('Register-ScheduledTask')) throw new Error('Kurulum bileşeni eksik.');
+    return;
+  }
+  if (process.argv.includes('--desktop-dry-run')) {
+    process.stdout.write(dryRunInstaller());
+    return;
+  }
   const configPath = resolve(option('--config-path') ?? configuredPath());
+  if (process.argv.includes('--validate-config')) { readConfig(configPath); return; }
   if (process.argv.includes('--secure-config')) {
     securePersistentPath(dirname(configPath));
     securePersistentPath(configPath);

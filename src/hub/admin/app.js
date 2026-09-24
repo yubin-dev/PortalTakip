@@ -13,6 +13,12 @@ const errorText = {
   INVALID_SETUP: 'Kurulum bilgilerini kontrol edin.',
   INVALID_STAFF: 'Personel adını kontrol edin.',
   INVALID_USER: 'Personel kaydı bulunamadı.',
+  INVALID_DEVICE: 'Cihaz kaydı bulunamadı.',
+  INVALID_ACCOUNT: 'Hesap bilgilerini ve personel seçimini kontrol edin.',
+  ACCOUNT_EXISTS: 'Bu portal ve kod zaten kayıtlı.',
+  ACCOUNT_NOT_FOUND: 'Hesap kaydı bulunamadı.',
+  IMPORT_ACTIVE_ACCOUNTS_FIRST: 'Önce etkin eski hesap kodlarını eşleştirin veya kilit ve kuyrukların boşalmasını bekleyin.',
+  STAFF_DISABLED: 'Atılan personele davet oluşturulamaz. Önce yeniden kabul edin.',
   INVALID_MESSAGE: 'Portal veya ortak hesap kodunu kontrol edin.',
   RATE_LIMIT: 'Çok sık işlem yapıldı. Bir süre bekleyip tekrar deneyin.',
   SERVER_ERROR: 'Hub işlemi tamamlayamadı. Tekrar deneyin.',
@@ -59,8 +65,10 @@ function clearSecrets() {
   $('toggleStaffToken').textContent = 'Göster';
   $('toggleStaffToken').setAttribute('aria-label', 'Personel anahtarını göster');
   $('toggleStaffToken').setAttribute('aria-pressed', 'false');
-  $('accountCode').value = '';
-  $('accountCodeResult').hidden = true;
+  $('inviteLink').value = '';
+  $('inviteLink').type = 'password';
+  $('inviteResult').hidden = true;
+  $('importCode').value = '';
 }
 
 function setOrganizationCode(value) {
@@ -209,6 +217,9 @@ function renderLocks(containerId, locks, portal, available = true) {
     const card = node('article', 'lock-card');
     const top = node('div', 'lock-top');
     const codeBlock = node('div');
+    const managed = latestState?.accounts?.find((account) =>
+      account.portal === portal && account.code === lock.key.accountCode);
+    if (managed) codeBlock.append(node('strong', '', managed.label));
     codeBlock.append(node('span', 'lock-code-label', 'Ortak hesap kodu'),
       node('strong', 'lock-code', lock.key.accountCode));
     top.append(codeBlock, node('span', 'count-badge', `${lock.queue.length} bekleyen`));
@@ -289,6 +300,30 @@ function renderStaff(staff, available = true) {
     info.append(node('strong', '', person.displayName),
       statusChip(person.connected, person.disabled));
     item.append(info);
+    const inviteButton = node('button', 'button button-secondary', 'Davet oluştur');
+    inviteButton.type = 'button';
+    inviteButton.disabled = person.disabled;
+    inviteButton.setAttribute('aria-label', `${person.displayName} için davet oluştur`);
+    inviteButton.addEventListener('click', async () => {
+      const host = $('lanAddress').value.trim();
+      if (!latestState?.lanAddresses?.includes(host)) {
+        notify('Önce listeden Hub LAN adresini seçin.', 'error'); return;
+      }
+      try {
+        const data = await api('/api/invitations', 'POST', {userId: person.userId});
+        const url = new URL(`http://${host}:${latestState.wsPort}/invite`);
+        url.hash = new URLSearchParams({invite: data.inviteToken}).toString();
+        $('inviteStaffName').textContent = person.displayName;
+        $('inviteLink').value = url.href;
+        $('inviteLink').type = 'password';
+        $('toggleInviteLink').textContent = 'Göster';
+        $('toggleInviteLink').setAttribute('aria-pressed', 'false');
+        $('inviteExpiry').textContent = `Son kullanım: ${new Date(data.expiresAt).toLocaleTimeString('tr-TR')}. Yeni davet oluşturulursa önceki geçersizleşir.`;
+        $('inviteResult').hidden = false;
+        notify(`${person.displayName} için davet oluşturuldu. Bağlantıyı yalnızca ilgili kişiye iletin.`, 'success');
+      } catch (error) { notify(error.message, 'error'); }
+    });
+    item.append(inviteButton);
     const button = node('button', `button ${person.disabled ? 'button-secondary' :
       'button-danger-outline'}`, person.disabled ? 'Yeniden kabul' : 'At');
     button.type = 'button';
@@ -312,7 +347,122 @@ function renderStaff(staff, available = true) {
       });
     });
     item.append(button);
+    const devices = node('div', 'staff-devices');
+    for (const device of person.devices ?? []) {
+      const deviceRow = node('div', 'device-row');
+      deviceRow.append(node('span', '', `Cihaz ${device.deviceId.slice(0, 8)} · ${device.revokedAt ?
+        'Erişim iptal' : 'Erişim açık'}`));
+      if (!device.revokedAt) {
+        const revoke = node('button', 'button button-danger-outline', 'Cihazı iptal et');
+        revoke.type = 'button';
+        revoke.addEventListener('click', () => askConfirmation({
+          title: 'Cihaz erişimi iptal edilsin mi?',
+          description: 'Bu cihazın bağlantısı kapanır; yeniden katılım için yeni davet gerekir.',
+          target: `Personel: ${person.displayName}\nCihaz: ${device.deviceId}`,
+          actionLabel: 'Cihazı iptal et',
+          action: () => perform(() => api('/api/devices/revoke', 'POST',
+            {deviceId: device.deviceId}), `${person.displayName} cihaz erişimi iptal edildi.`),
+        }));
+        deviceRow.append(revoke);
+      }
+      devices.append(deviceRow);
+    }
+    if (devices.childElementCount) item.append(devices);
     list.append(item);
+  }
+}
+
+function staffChoices(containerId, staff, selectedIds = []) {
+  const container = $(containerId);
+  const hadChoices = container.querySelector('input') !== null;
+  const prior = new Set([...container.querySelectorAll('input:checked')].map((input) => input.value));
+  container.replaceChildren();
+  for (const person of staff) {
+    const label = node('label', 'account-choice');
+    const input = node('input');
+    input.type = 'checkbox';
+    input.value = person.userId;
+    input.checked = hadChoices ? prior.has(person.userId) : selectedIds.includes(person.userId);
+    label.append(input, document.createTextNode(person.displayName));
+    container.append(label);
+  }
+}
+
+function chosenStaff(container) {
+  return [...container.querySelectorAll('input:checked')].map((input) => input.value);
+}
+
+function renderAccounts(data) {
+  staffChoices('newAccountStaff', data.staff);
+  staffChoices('importAccountStaff', data.staff);
+  $('legacyMigration').hidden = !data.legacyAllowed;
+  const list = $('accountList');
+  // Keep an in-progress assignment edit intact during five-second refreshes.
+  const editingId = list.querySelector('[data-editing="true"]')?.dataset.accountId;
+  if (editingId) return;
+  list.replaceChildren();
+  if (!data.accounts.length) {
+    list.append(node('p', 'staff-empty', 'Henüz yönetilen hesap yok.'));
+    return;
+  }
+  for (const account of data.accounts) {
+    const card = node('article', 'account-card');
+    card.dataset.accountId = account.id;
+    card.append(node('strong', '', `${account.portal} · ${account.label}`));
+    const code = node('code', 'account-managed-code', account.code);
+    card.append(code);
+    const copy = node('button', 'button button-secondary', 'Bu kodu kopyala');
+    copy.type = 'button';
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(account.code);
+        notify(`${account.portal} · ${account.label} kodu panoya kopyalandı.`, 'success');
+      } catch { notify('Pano izni verilmedi. Kodu seçip Ctrl+C kullanın.', 'error'); }
+    });
+    card.append(copy);
+    const names = account.assignedUserIds.map((id) =>
+      data.staff.find((person) => person.userId === id)?.displayName ?? 'Bilinmeyen personel');
+    card.append(node('p', '', `Erişim: ${names.join(', ') || 'Kimse atanmadı'}`));
+    const edit = node('button', 'button button-quiet', 'Atamaları düzenle');
+    edit.type = 'button';
+    edit.addEventListener('click', () => {
+      card.dataset.editing = 'true';
+      edit.hidden = true;
+      const options = node('div', 'account-staff');
+      for (const person of data.staff) {
+        const label = node('label', 'account-choice');
+        const checkbox = node('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = person.userId;
+        checkbox.checked = account.assignedUserIds.includes(person.userId);
+        label.append(checkbox, document.createTextNode(person.displayName));
+        options.append(label);
+      }
+      const save = node('button', 'button button-primary', 'Atamaları kaydet');
+      save.type = 'button';
+      const cancel = node('button', 'button button-quiet', 'Vazgeç');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => {
+        card.dataset.editing = 'false';
+        renderAccounts(latestState);
+      });
+      save.addEventListener('click', () => {
+        const assignedUserIds = chosenStaff(options);
+        const removed = account.assignedUserIds.filter((id) => !assignedUserIds.includes(id));
+        const action = () => { card.dataset.editing = 'false'; return perform(() => api('/api/accounts/assign', 'POST',
+          {accountId: account.id, assignedUserIds}), 'Hesap atamaları güncellendi.');
+        };
+        if (removed.length) askConfirmation({
+          title: 'Hesap erişimi kaldırılsın mı?',
+          description: 'Bu kişilerin bu hesaptaki kilit ve sıra yerleri hemen silinir. Kilit sıradakine FIFO devredilir.',
+          target: `${account.portal} · ${account.label}\nKod: ${account.code}\nErişimi kaldırılanlar: ${removed.map((id) => data.staff.find((person) => person.userId === id)?.displayName ?? id).join(', ')}`,
+          actionLabel: 'Erişimi kaldır', action,
+        });
+        else void action();
+      });
+      card.append(options, save, cancel);
+    });
+    card.append(edit);
+    list.append(card);
   }
 }
 
@@ -324,9 +474,13 @@ function clearLiveState() {
   $('waitingCount').textContent = '—';
   $('lanSummary').textContent = '—';
   $('lastUpdated').textContent = 'Canlı veri alınamıyor';
+  $('addressNotice').hidden = true;
+  $('restartNotice').hidden = true;
   renderLocks('gibLocks', [], 'GİB', false);
   renderLocks('sgkLocks', [], 'SGK', false);
   renderStaff([], false);
+  $('accountList').replaceChildren();
+  $('legacyMigration').hidden = true;
 }
 
 async function refresh() {
@@ -337,6 +491,14 @@ async function refresh() {
     const data = await api('/api/state');
     if (csrfToken !== requestedCsrf) return;
     latestState = data;
+    try {
+      const old = JSON.parse(localStorage.getItem('ptAdminLastHub') ?? 'null');
+      if (old?.organizationId === data.organizationId && old.hubId !== data.hubId) {
+        $('restartNotice').hidden = false;
+      }
+      localStorage.setItem('ptAdminLastHub', JSON.stringify({organizationId: data.organizationId,
+        hubId: data.hubId}));
+    } catch { /* Browser storage is optional for this notice. */ }
     serverClock = {at: data.serverTime ?? Date.now(), receivedAt: performance.now()};
     setHubStatus('online', 'Hub bağlı');
     $('headerOrganization').textContent = data.organizationName;
@@ -357,9 +519,17 @@ async function refresh() {
     $('lanSummary').textContent = $('lanAddress').value.trim() || 'Bulunamadı';
     $('lanSummaryNote').textContent = $('lanAddress').value.trim() ?
       `WebSocket portu ${data.wsPort}` : 'Adresi aşağıdan elle girin';
+    const noAddress = data.lanAddresses.length === 0;
+    $('addressNotice').hidden = !noAddress && !data.network?.changed;
+    $('acknowledgeAddress').hidden = noAddress;
+    $('addressNoticeText').textContent = noAddress ?
+      'Aktif LAN IPv4 adresi bulunamadı. Ağ bağlantısını ve Windows ağ profilini kontrol edin.' :
+      data.network?.changed ?
+        `Önceki: ${data.network.previous.join(', ') || 'bilinmiyor'}. Yeni: ${data.lanAddresses.join(', ')}. Personelin Hub adresini güncelleyin.` : '';
     renderLocks('gibLocks', data.locks.filter((lock) => lock.key.portal === 'GİB'), 'GİB');
     renderLocks('sgkLocks', data.locks.filter((lock) => lock.key.portal === 'SGK'), 'SGK');
     renderStaff(data.staff);
+    renderAccounts(data);
   } catch (error) {
     if (csrfToken) {
       const wasOnline = latestState !== null;
@@ -378,6 +548,9 @@ $('confirmAction').addEventListener('click', async () => {
 });
 $('cancelConfirm').addEventListener('click', () => { pendingConfirmation = null; $('confirmDialog').close(); });
 $('confirmDialog').addEventListener('cancel', () => { pendingConfirmation = null; });
+$('dismissRestart').addEventListener('click', () => { $('restartNotice').hidden = true; });
+$('acknowledgeAddress').addEventListener('click', () => perform(() =>
+  api('/api/network/acknowledge', 'POST'), 'Yeni LAN adresi kaydedildi. Personel bağlantı adreslerini güncelleyin.'));
 
 $('setupForm').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -445,25 +618,52 @@ $('rotateForm').addEventListener('submit', (event) => {
   const password = $('rotatePassword').value;
   askConfirmation({
     title: 'Kurum kodu yenilensin mi?',
-    description: 'Tüm personel bağlantıları kapanır. Yeni kodu herkese yeniden dağıtmanız gerekir.',
+    description: 'Tüm personel bağlantıları kapanır; davetler ve cihaz anahtarları iptal edilir. Eski yöntemle bağlananlara yeni kod gerekir.',
     target: `Kurum: ${latestState?.organizationName ?? 'Kurum'}\nEtkilenen bağlı personel: ${latestState?.clients ?? 'bilinmiyor'}`,
     actionLabel: 'Kodu yenile',
     action: () => perform(async () => {
       const data = await api('/api/organization-code/rotate', 'POST', {password});
       $('rotatePassword').value = '';
+      $('inviteLink').value = '';
+      $('inviteResult').hidden = true;
       setOrganizationCode(data.organizationCode);
-    }, 'Kurum kodu yenilendi. Yeni kodu personelle güvenli biçimde paylaşın.'),
+    }, 'Kurum kodu yenilendi. Eski bağlantılar ve davetler geçersiz; gerektiğinde yeni davet oluşturun.'),
   });
 });
 
-$('generateAccountCode').addEventListener('click', async () => {
+$('accountForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
   try {
-    const data = await api('/api/account-code', 'POST');
-    $('accountCode').value = data.accountCode;
-    $('accountCodeResult').hidden = false;
-    notify('Yeni ortak hesap kodu üretildi. Aynı hesabı kullananlara aynı kodu verin.', 'success');
+    await api('/api/accounts', 'POST', {portal: $('accountPortal').value,
+      label: $('accountLabel').value, assignedUserIds: chosenStaff($('newAccountStaff'))});
+    $('accountLabel').value = '';
+    $('newAccountStaff').replaceChildren();
+    notify('Hesap oluşturuldu ve seçilen personele gönderildi.', 'success');
+    await refresh();
   } catch (error) { notify(error.message, 'error'); }
 });
+
+$('importAccountForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('/api/accounts/import', 'POST', {portal: $('importPortal').value,
+      label: $('importLabel').value, accountCode: $('importCode').value.trim(),
+      assignedUserIds: chosenStaff($('importAccountStaff'))});
+    $('importLabel').value = '';
+    $('importCode').value = '';
+    $('importAccountStaff').replaceChildren();
+    notify('Eski kod aynen eşleştirildi; etkin sıra taşınmadı.', 'success');
+    await refresh();
+  } catch (error) { notify(error.message, 'error'); }
+});
+
+$('enforceAccounts').addEventListener('click', () => askConfirmation({
+  title: 'Eski elle kullanımı kapat?',
+  description: 'Eşleşmemiş yerel kodlarla yeni kilit isteği Hub tarafından reddedilir. Kodları önce içe alın; bu işlem mevcut kodları değiştirmez.',
+  target: `Kurum: ${latestState?.organizationName ?? 'Kurum'}\nYönetilen hesap: ${latestState?.accounts?.length ?? 0}`,
+  actionLabel: 'Elle kullanımı kapat',
+  action: () => perform(() => api('/api/accounts/enforce', 'POST'), 'Artık yalnızca atanan hesaplar kullanılabilir.'),
+}));
 
 $('unlockForm').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -473,11 +673,12 @@ $('unlockForm').addEventListener('submit', (event) => {
 for (const [button, input, label] of [
   ['copyAddress', 'lanAddress', 'Hub LAN adresi'], ['copyPort', 'wsPort', 'WebSocket portu'],
   ['copyCode', 'organizationCode', 'Kurum kodu'], ['copyStaffToken', 'staffToken', 'Personel anahtarı'],
-  ['copyAccountCode', 'accountCode', 'Ortak hesap kodu'],
+  ['copyInviteLink', 'inviteLink', 'Davet bağlantısı'],
 ]) $(button).addEventListener('click', () => copyInput(input, label));
 
 $('toggleCode').addEventListener('click', () => toggleSecret('organizationCode', 'toggleCode', 'Kurum kodunu'));
 $('toggleStaffToken').addEventListener('click', () => toggleSecret('staffToken', 'toggleStaffToken', 'Personel anahtarını'));
+$('toggleInviteLink').addEventListener('click', () => toggleSecret('inviteLink', 'toggleInviteLink', 'Davet bağlantısını'));
 $('lanAddress').addEventListener('input', () => {
   $('lanSummary').textContent = $('lanAddress').value.trim() || 'Bulunamadı';
 });

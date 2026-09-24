@@ -1,4 +1,5 @@
-import {validateConnectionInput, websocketUrl} from '../ui/connection-input.js';
+import {validateConnectionInput, validateDeviceConnectionInput,
+  validateInvitationLink, websocketUrl} from '../ui/connection-input.js';
 import {accountView, becameHolder, portalForUrl, validAccountCode} from './portal-state.js';
 
 let connection = null;
@@ -17,6 +18,8 @@ let snapshotReceivedAt = null;
 let lastStateAt = null;
 let accountOrganizationId = null;
 let accounts = [];
+let managedAccounts = [];
+let legacyAllowed = false;
 const selections = new Map(); // tabId -> accountId; never sent to portal page scripts
 const subscribedTabs = new Map(); // tabId -> portal
 const pendingRequests = new Map(); // requestId -> {tabId, message, hubId, sentAt, needsReplay}
@@ -40,8 +43,15 @@ function storageTask(operation) {
 }
 
 function publicStatus() { return {...status}; }
+function availableAccounts() {
+  const managedKeys = new Set(managedAccounts.map((entry) =>
+    JSON.stringify([entry.portal, entry.code])));
+  return [...managedAccounts, ...(legacyAllowed ? accounts.filter((entry) =>
+    !managedKeys.has(JSON.stringify([entry.portal, entry.code]))) : [])];
+}
 function accountForTab(tabId, portal) {
-  return accounts.find((entry) => entry.id === selections.get(tabId) && entry.portal === portal);
+  return availableAccounts().find((entry) =>
+    entry.id === selections.get(tabId) && entry.portal === portal);
 }
 function viewForTab(tabId, portal) {
   const view = accountView({phase: status.phase, snapshot, userId, portal,
@@ -54,7 +64,8 @@ function viewForTab(tabId, portal) {
 }
 function portalPayload(tabId, portal) {
   return {view: viewForTab(tabId, portal),
-    accounts: accounts.filter((entry) => entry.portal === portal).map((entry) =>
+    legacyAllowed,
+    accounts: availableAccounts().filter((entry) => entry.portal === portal).map((entry) =>
       ({id: entry.id, label: entry.label}))};
 }
 function sendTab(tabId, message) {
@@ -91,6 +102,8 @@ function closeTransport({discardPending = false} = {}) {
   clearTimers();
   userId = null;
   snapshot = null; // never retain a held indicator across a lost connection
+  managedAccounts = [];
+  legacyAllowed = false;
   snapshotReceivedAt = null;
   lastStateAt = null;
   if (discardPending) pendingRequests.clear();
@@ -132,6 +145,9 @@ function fatal(code) {
     AUTH_FAILED: 'Kurum kodu veya personel anahtarı kabul edilmedi.',
     KICKED: 'Yönetici erişiminizi kapattı.',
     CODE_ROTATED: 'Kurum kodu yenilendi. Yeni kodu yöneticiden alın.',
+    INVITE_INVALID: 'Davet süresi dolmuş veya bağlantı kullanılmış. Yöneticiden yeni davet alın.',
+    DEVICE_REVOKED: 'Bu cihazın erişimi yönetici tarafından iptal edildi.',
+    STORAGE_FAILED: 'Cihaz anahtarı saklanamadı. Yöneticiden yeni davet alın.',
     INVALID_HELLO: 'Hub bağlantı bilgilerini reddetti.',
     RATE_LIMIT: 'Çok fazla istek gönderildi. Bir süre bekleyin.',
   };
@@ -140,6 +156,7 @@ function fatal(code) {
   closeTransport({discardPending: true});
   clearRetryAlarm();
   void storageTask(() => chrome.storage.session.remove(['ptConnection', 'ptLastHubId']));
+  void storageTask(() => chrome.storage.local?.remove('ptRememberedConnection'));
   setStatus({phase: 'error', detail: details[code] ?? 'Hub bağlantıyı reddetti.'});
 }
 function notifyTurns(previous, current) {
@@ -206,6 +223,19 @@ function handleState(message) {
     accountOrganizationId = message.organizationId;
     void storageTask(() => chrome.storage.session.set({ptAccountOrganizationId: accountOrganizationId}));
   }
+  managedAccounts = Array.isArray(message.accounts) ? message.accounts.filter((entry) =>
+    typeof entry?.id === 'string' && ['GİB', 'SGK'].includes(entry.portal) &&
+    typeof entry.label === 'string' && validAccountCode(entry.code)) : [];
+  legacyAllowed = message.legacyAllowed === true;
+  for (const [tabId, selectedId] of selections) {
+    const old = accounts.find((entry) => entry.id === selectedId);
+    const mapped = old && managedAccounts.find((entry) => entry.portal === old.portal &&
+      entry.code === old.code);
+    if (mapped) selections.set(tabId, mapped.id);
+    else if (!availableAccounts().some((entry) => entry.id === selectedId)) selections.delete(tabId);
+  }
+  void storageTask(() => chrome.storage.session.set({ptSelections:
+    [...selections].map(([tabId, accountId]) => ({tabId, accountId}))}));
   setStatus({phase: 'connected', detail: message.reset ?
     'Hub yeniden başladı; kilit durumu sıfırlandı.' : 'Hub bağlı; durum güncel.',
   ...summarize(message)});
@@ -219,12 +249,17 @@ function connectSocket() {
   let ws;
   try { ws = new WebSocket(websocketUrl(connection)); }
   catch { retry(); return; }
+  let credentialPersisted = Promise.resolve();
   socket = ws;
   handshakeTimer = setTimeout(() => { if (generation === current) ws.close(); }, 12_000);
   ws.onopen = () => {
     if (generation !== current) return;
-    ws.send(JSON.stringify({type: 'HELLO', organizationCode: connection.organizationCode,
-      staffToken: connection.staffToken, ...(lastHubId ? {lastHubId} : {})}));
+    const credential = connection.authKind === 'invite' ?
+      {inviteToken: connection.inviteToken} : connection.authKind === 'device' ?
+        {deviceToken: connection.deviceToken} :
+        {organizationCode: connection.organizationCode, staffToken: connection.staffToken};
+    ws.send(JSON.stringify({type: 'HELLO', ...credential,
+      ...(lastHubId ? {lastHubId} : {})}));
   };
   ws.onmessage = (event) => {
     if (generation !== current) return;
@@ -240,6 +275,19 @@ function connectSocket() {
     }
     if (message.type === 'HELLO' && message.status === 'ok' &&
         typeof message.hubId === 'string' && typeof message.userId === 'string') {
+      if (connection.authKind === 'invite') {
+        const validated = validateDeviceConnectionInput({authKind: 'device',
+          host: connection.host, port: connection.port, deviceToken: message.deviceToken});
+        if (!validated.ok) { fatal('INVALID_HELLO'); return; }
+        const remember = connection.rememberDevice;
+        const deviceConnection = validated.value;
+        connection = deviceConnection;
+        credentialPersisted = storageTask(async () => {
+          await chrome.storage.session.set({ptConnection: deviceConnection});
+          if (remember) await chrome.storage.local.set({ptRememberedConnection: deviceConnection});
+          else await chrome.storage.local.remove('ptRememberedConnection');
+        });
+      }
       clearTimeout(handshakeTimer);
       handshakeTimer = null;
       lastStateAt = performance.now();
@@ -265,7 +313,12 @@ function connectSocket() {
       }, 20_000);
       return;
     }
-    if (message.type === 'STATE') { handleState(message); return; }
+    if (message.type === 'STATE') {
+      void credentialPersisted.then(() => {
+        if (generation === current && ws.readyState === WebSocket.OPEN) handleState(message);
+      }).catch(() => { if (generation === current) fatal('STORAGE_FAILED'); });
+      return;
+    }
     if (message.type === 'ERROR' ||
         ['ACQUIRE', 'RELEASE', 'CANCEL', 'CONFIRM'].includes(message.type)) {
       replyToOperation(message);
@@ -295,23 +348,31 @@ function connectSocket() {
 
 async function restoreSession() {
   await chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
+  await chrome.storage.local?.setAccessLevel?.({accessLevel: 'TRUSTED_CONTEXTS'});
   const saved = await chrome.storage.session.get(['ptConnection', 'ptLastHubId',
     'ptAccounts', 'ptSelections', 'ptAccountOrganizationId']);
+  const remembered = await chrome.storage.local?.get?.('ptRememberedConnection');
   accounts = Array.isArray(saved.ptAccounts) ? saved.ptAccounts.filter((entry) =>
     typeof entry?.id === 'string' && ['GİB', 'SGK'].includes(entry.portal) &&
     typeof entry.label === 'string' && validAccountCode(entry.code)).slice(0, 50) : [];
   if (Array.isArray(saved.ptSelections)) {
     for (const item of saved.ptSelections) {
-      if (Number.isInteger(item?.tabId) && accounts.some((entry) => entry.id === item.accountId)) {
+      if (Number.isInteger(item?.tabId) && typeof item.accountId === 'string') {
         selections.set(item.tabId, item.accountId);
       }
     }
   }
   accountOrganizationId = typeof saved.ptAccountOrganizationId === 'string' ?
     saved.ptAccountOrganizationId : null;
-  const validated = validateConnectionInput(saved.ptConnection);
+  const candidate = saved.ptConnection ?? remembered?.ptRememberedConnection;
+  const validated = candidate?.authKind === 'device' ?
+    validateDeviceConnectionInput(candidate) : candidate?.authKind === 'invite' ?
+      validateInvitationLink(`http://${candidate.host}:${candidate.port}/invite#invite=${candidate.inviteToken}`) :
+      validateConnectionInput(candidate);
   if (validated.ok) {
-    connection = validated.value;
+    connection = candidate?.authKind === 'invite' ? candidate :
+      candidate?.authKind === 'device' ? validated.value :
+        {...validated.value, authKind: 'legacy'};
     lastHubId = typeof saved.ptLastHubId === 'string' ? saved.ptLastHubId : null;
     connectSocket();
   }
@@ -362,12 +423,15 @@ async function handlePortalMessage(message, sender, verified) {
   subscribedTabs.set(tabId, portal);
   if (message.type === 'PT_CONTENT_INIT') return {ok: true, ...portalPayload(tabId, portal)};
   if (message.type === 'PT_ACCOUNT_ADD') {
+    if (!legacyAllowed || status.phase !== 'connected') {
+      return {ok: false, error: 'Hesapları yönetici atar; güncel bağlantıyı bekleyin.'};
+    }
     const label = typeof message.label === 'string' ? message.label.trim() : '';
     if (label.length < 1 || label.length > 40 || /[\u0000-\u001f]/.test(label) ||
         !validAccountCode(message.accountCode)) {
       return {ok: false, error: 'Hesap etiketi veya kodu geçersiz.'};
     }
-    let account = accounts.find((entry) =>
+    let account = availableAccounts().find((entry) =>
       entry.portal === portal && entry.code === message.accountCode);
     if (!selectionMayChange(tabId, portal, account?.id)) {
       return {ok: false, error: 'Mevcut kilit veya sırayı bırakmadan hesap değiştirilemez.'};
@@ -383,7 +447,7 @@ async function handlePortalMessage(message, sender, verified) {
     return {ok: true, ...portalPayload(tabId, portal)};
   }
   if (message.type === 'PT_ACCOUNT_SELECT') {
-    const account = accounts.find((entry) => entry.id === message.accountId &&
+    const account = availableAccounts().find((entry) => entry.id === message.accountId &&
       entry.portal === portal);
     if (!account) return {ok: false, error: 'Hesap bulunamadı.'};
     if (!selectionMayChange(tabId, portal, account.id)) {
@@ -429,12 +493,15 @@ async function handlePopupMessage(message) {
     closeTransport({discardPending: true});
     clearRetryAlarm();
     await storageTask(() => chrome.storage.session.remove(['ptConnection', 'ptLastHubId']));
+    await storageTask(() => chrome.storage.local?.remove('ptRememberedConnection'));
     setStatus({phase: 'disconnected', detail: 'Bağlantı kullanıcı tarafından kesildi.'});
     return {ok: true, status: publicStatus()};
   }
-  const validated = validateConnectionInput(message.config);
+  const invite = message.type === 'PT_CONNECT_INVITE';
+  const validated = invite ? validateInvitationLink(message.config?.invitationLink) :
+    validateConnectionInput(message.config);
   if (!validated.ok) return {ok: false, error: validated.message};
-  if (connection && connection.organizationCode !== validated.value.organizationCode) {
+  if (!invite && connection && connection.organizationCode !== validated.value.organizationCode) {
     accounts = [];
     selections.clear();
     accountOrganizationId = null;
@@ -443,11 +510,14 @@ async function handlePopupMessage(message) {
   }
   closeTransport({discardPending: true});
   clearRetryAlarm();
-  connection = validated.value;
+  connection = invite ? {...validated.value, authKind: 'invite',
+    rememberDevice: message.config?.rememberDevice === true} :
+    {...validated.value, authKind: 'legacy'};
   lastHubId = null;
   retryDelayMs = 2000;
   await storageTask(() => chrome.storage.session.set({ptConnection: connection}));
   await storageTask(() => chrome.storage.session.remove('ptLastHubId'));
+  await storageTask(() => chrome.storage.local?.remove('ptRememberedConnection'));
   connectSocket();
   return {ok: true, status: publicStatus()};
 }
@@ -457,7 +527,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const isPortalMessage = portal && ['PT_CONTENT_INIT', 'PT_ACCOUNT_ADD',
     'PT_ACCOUNT_SELECT', 'PT_ACTION', 'PT_CONFIRM'].includes(message?.type);
   const isPopupMessage = popupSender(sender) && ['PT_GET_STATUS', 'PT_CONNECT',
-    'PT_DISCONNECT'].includes(message?.type);
+    'PT_CONNECT_INVITE', 'PT_DISCONNECT'].includes(message?.type);
   if (!isPortalMessage && !isPopupMessage) return;
   (async () => {
     await initialized;

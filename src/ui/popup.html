@@ -18,6 +18,16 @@
       <p id="connectionDetail">Hub durumu alınıyor.</p>
       <div class="state-grid"><div><span>GİB</span><strong id="gibStatus">—</strong></div><div><span>SGK</span><strong id="sgkStatus">—</strong></div></div>
     </section>
+    <form id="inviteForm" novalidate>
+      <div class="field-row"><label for="invitationLink">Davet bağlantısını yapıştır</label>
+        <input id="invitationLink" type="text" spellcheck="false" autocomplete="off"
+          placeholder="Yöneticinin gönderdiği bağlantı" required></div>
+      <label class="remember-option" for="rememberDevice"><input id="rememberDevice" type="checkbox">
+        Bu cihazı hatırla</label>
+      <p class="field-hint">Seçilirse iptal edilebilir cihaz anahtarı bu Chrome profilinde saklanır. Paylaşılan profilde seçmeyin.</p>
+      <button id="inviteConnectButton" type="submit">Davetle bağlan</button>
+    </form>
+    <details id="manualConnection"><summary>Elle bağlantı bilgileriyle bağlan</summary>
     <form id="connectionForm" novalidate>
       <div class="field-row">
         <label for="displayName">Ad soyad</label>
@@ -34,10 +44,12 @@
       <p class="field-hint">Özel/yerel IP veya localhost. Kurum kodu adresi bulmaz.</p>
       <div class="field-row"><label for="organizationCode">Kurum kodu</label><input id="organizationCode" name="organizationCode" type="password" spellcheck="false" autocomplete="off" placeholder="Yöneticinin verdiği kod" required></div>
       <div class="field-row"><label for="staffToken">Personel erişim anahtarı</label><input id="staffToken" name="staffToken" type="password" spellcheck="false" autocomplete="off" placeholder="Size özel anahtar" required></div>
-      <div class="actions"><button id="connectButton" type="submit">Bağlan</button><button id="disconnectButton" type="button">Bağlantıyı Kes</button></div>
+      <div class="actions"><button id="connectButton" type="submit">Elle bağlan</button></div>
     </form>
+    </details>
+    <button id="disconnectButton" type="button">Bağlantıyı Kes</button>
     <p id="message" class="message" role="status" aria-live="polite"></p>
-    <footer>Kodlar bu bilgisayarda kalıcı saklanmaz. Paylaşılan profilde işiniz bitince bağlantıyı kesin.</footer>
+    <footer>Elle bağlantı kodları kalıcı saklanmaz. Hatırlanan cihaz anahtarı bu Chrome profilinde kalır; işiniz bitince bağlantıyı kesin.</footer>
   </main>
 </body>
 </html>

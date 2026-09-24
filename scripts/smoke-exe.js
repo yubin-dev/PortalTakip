@@ -76,10 +76,15 @@ async function* onceMessages(ws) {
 }
 
 try {
+  execFileSync(exe, ['--desktop-check-assets'], {cwd: otherDirectory,
+    env: {...process.env, PORTALTAKIP_CONFIG: ''}, encoding: 'utf8'});
+  const dryRun = execFileSync(exe, ['--desktop-dry-run'], {cwd: otherDirectory,
+    env: {...process.env, PORTALTAKIP_CONFIG: ''}, encoding: 'utf8'});
+  assert.match(dryRun, /What if:/i);
   const setup = execFileSync('cmd.exe', ['/d', '/s', '/c', 'npm.cmd run hub:init'], {
     cwd: resolve('.'), env: {...process.env, PORTALTAKIP_CONFIG: configPath}, encoding: 'utf8'});
   const setupToken = readFileSync(join(directory, 'setup-key.txt'), 'utf8').trim();
-  assert.match(setupToken, /^[A-Za-z0-9_-]{43}$/);
+  assert.match(setupToken, /^[A-Za-z0-9_-]{20}$/);
   assert.equal(setup.includes(setupToken), false, 'setup key must not be logged');
   assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).state, 'pending');
   const wsPort = await freePort();
@@ -109,7 +114,20 @@ try {
   assert.match(stored, /scrypt\$/);
   const staff = await post(base, '/api/staff', {displayName: 'Temiz Personel'}, cookie, csrf);
   assert.equal(staff.response.status, 201);
-  const account = await post(base, '/api/account-code', {}, cookie, csrf);
+  const invitation = await post(base, '/api/invitations',
+    {userId: staff.data.userId}, cookie, csrf);
+  assert.equal(invitation.response.status, 201);
+  assert.equal(readFileSync(configPath, 'utf8').includes(invitation.data.inviteToken), false);
+  const inviteWs = new WebSocket(`ws://127.0.0.1:${wsPort}/ws`);
+  await once(inviteWs, 'open');
+  inviteWs.send(JSON.stringify({type: 'HELLO', inviteToken: invitation.data.inviteToken}));
+  const deviceToken = (await wsMessage(inviteWs, (msg) => msg.type === 'HELLO')).deviceToken;
+  assert.equal(deviceToken.length, 43);
+  assert.equal(readFileSync(configPath, 'utf8').includes(deviceToken), false);
+  inviteWs.terminate();
+  const account = await post(base, '/api/accounts', {portal: 'GİB',
+    label: 'Test hesabı', assignedUserIds: [staff.data.userId]}, cookie, csrf);
+  assert.equal(account.response.status, 201);
   const ws = new WebSocket(`ws://127.0.0.1:${wsPort}/ws`);
   await once(ws, 'open');
   ws.send(JSON.stringify({type: 'HELLO', organizationCode: code,
@@ -118,7 +136,7 @@ try {
   assert.equal(hello.stateReset, true);
   const requestId = randomUUID();
   ws.send(JSON.stringify({type: 'ACQUIRE', portal: 'GİB',
-    accountCode: account.data.accountCode, requestId}));
+    accountCode: account.data.account.code, requestId}));
   assert.equal((await wsMessage(ws, (msg) => msg.requestId === requestId)).status, 'held');
   assert.equal((await (await fetch(`${base}/api/state`, {headers: {Cookie: cookie}})).json()).locks.length, 1);
   ws.terminate();
@@ -135,6 +153,12 @@ try {
   assert.equal(snapshot.organizationName, 'Temiz Kurulum');
   assert.equal(snapshot.staff.length, 1);
   assert.deepEqual(snapshot.locks, []);
+  const remembered = new WebSocket(`ws://127.0.0.1:${wsPort}/ws`);
+  await once(remembered, 'open');
+  remembered.send(JSON.stringify({type: 'HELLO', deviceToken}));
+  assert.equal((await wsMessage(remembered, (msg) => msg.type === 'HELLO')).userId,
+    staff.data.userId);
+  remembered.terminate();
   await stop();
 
   const legacy = join(directory, 'legacy', 'hub.json');
@@ -155,7 +179,7 @@ try {
   assert.notEqual(rotatedToken, migratedToken);
   assert.equal(JSON.parse(readFileSync(migrated, 'utf8')).setupTokenHash, digest(rotatedToken));
   assert.equal(rotatedOutput.includes(rotatedToken), false);
-  process.stdout.write('EXE testi geçti: hub:init, farklı çalışma dizini, panel, yeniden başlatma, eski ayar geçişi ve anahtar yenileme.\n');
+  process.stdout.write('EXE testi geçti: gömülü kurulum -WhatIf, hub:init, panel, davet/cihaz bağlantısı, yeniden başlatma, eski ayar geçişi ve anahtar yenileme.\n');
 } finally {
   await stop();
   if (dirname(resolve(directory)) === resolve(tmpdir())) {

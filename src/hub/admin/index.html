@@ -25,9 +25,9 @@
       <section id="setupPanel" class="auth-card" aria-labelledby="setupTitle" hidden>
         <span class="eyebrow">İLK KURULUM</span>
         <h1 id="setupTitle">Ofisiniz için Hub'ı hazırlayın</h1>
-        <p>Kurulum anahtarı yalnızca Hub bilgisayarındaki korunmuş <code>%ProgramData%\PortalTakip\setup-key.txt</code> dosyasındadır.</p>
+        <p>Windows yönetici iznini onayladıktan sonra PortalTakip penceresinde görünen tek kullanımlık kurulum kodunu girin. Kodu kimseyle paylaşmayın.</p>
         <form id="setupForm" class="form-stack">
-          <label for="setupToken">Kurulum anahtarı</label><input id="setupToken" type="password" autocomplete="off" required>
+          <label for="setupToken">Uygulama penceresindeki kurulum kodu</label><input id="setupToken" type="password" autocomplete="off" required>
           <label for="organizationName">Kurum adı</label><input id="organizationName" minlength="2" maxlength="100" autocomplete="organization" required>
           <label for="setupPassword">Yönetici parolası <span class="label-hint">En az 12 karakter</span></label><input id="setupPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
           <label for="setupPasswordAgain">Parolayı tekrar girin</label><input id="setupPasswordAgain" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
@@ -46,6 +46,14 @@
       </section>
 
       <div id="adminPanel" hidden>
+        <section id="restartNotice" class="notice notice-maintenance" role="status" hidden>
+          <strong>Hub yeniden başladı.</strong> RAM'deki kilit ve kuyruklar boşaldı. Personel çalışmaya başlamadan önce hesabı için yeniden kilit istemelidir.
+          <button id="dismissRestart" class="button button-quiet" type="button">Anladım</button>
+        </section>
+        <section id="addressNotice" class="notice notice-maintenance" role="status" hidden>
+          <strong>Hub LAN adresi değişti.</strong> <span id="addressNoticeText"></span>
+          <button id="acknowledgeAddress" class="button button-secondary" type="button">Yeni adresi paylaştım</button>
+        </section>
         <div class="page-heading"><div><span class="eyebrow">OPERASYON EKRANI</span><h1>Canlı portal durumu</h1><p>GİB ve SGK hesap sıralarını tek ekranda izleyin.</p></div><span id="lastUpdated" class="update-label">Veri bekleniyor</span></div>
 
         <section class="stat-grid" aria-label="Hub özeti">
@@ -72,6 +80,17 @@
             <div class="surface-heading"><div><span class="eyebrow">EKİP</span><h2 id="staffTitle">Personel</h2></div><span id="staffCount" class="count-badge">0 kayıt</span></div>
             <p class="section-intro">Bağlantı ve erişim durumlarını izleyin. Atılan kişi tüm hesap sıralarından çıkarılır.</p>
             <ul id="staffList" class="staff-list"></ul>
+            <div id="inviteResult" class="secret-result" hidden>
+              <span class="eyebrow">10 DAKİKA · TEK KULLANIM</span>
+              <strong id="inviteStaffName"></strong>
+              <label for="inviteLink">Davet bağlantısı</label>
+              <div class="input-actions"><input id="inviteLink" type="password" readonly>
+                <button id="toggleInviteLink" class="button button-quiet" type="button"
+                  aria-pressed="false" aria-controls="inviteLink">Göster</button>
+                <button id="copyInviteLink" class="button button-primary" type="button">Daveti kopyala</button></div>
+              <p id="inviteExpiry"></p>
+              <p>Personel bağlantıyı eklentideki “Davet bağlantısını yapıştır” alanına girer. Bağlantıda kurum kodu veya kalıcı personel anahtarı yoktur.</p>
+            </div>
             <div class="subsection"><h3>Yeni personel</h3><form id="staffForm" class="form-stack compact-form"><label for="staffName">Görünen ad</label><input id="staffName" maxlength="80" autocomplete="name" placeholder="Ad soyad" required><button class="button button-secondary" type="submit">Erişim anahtarı oluştur</button></form>
               <div id="staffSecret" class="secret-result" hidden><span class="eyebrow">YALNIZCA BU OTURUMDA GÖSTERİLİR</span><strong id="secretStaffName"></strong><label for="staffToken">Personele özel anahtar</label><div class="input-actions"><input id="staffToken" type="password" readonly><button id="toggleStaffToken" class="button button-quiet" type="button" aria-pressed="false" aria-controls="staffToken">Göster</button><button id="copyStaffToken" class="button button-secondary" type="button">Anahtarı kopyala</button></div><p>Yalnızca ilgili personele güvenli yoldan iletin.</p></div>
             </div>
@@ -85,14 +104,33 @@
             <div class="field-grid"><label for="lanAddress">Hub LAN IPv4 adresi<div class="input-actions"><input id="lanAddress" list="lanAddresses" placeholder="Adres bulunamadı" autocomplete="off"><datalist id="lanAddresses"></datalist><button id="copyAddress" class="button button-secondary" type="button">Kopyala</button></div></label><label for="wsPort">WebSocket portu<div class="input-actions"><input id="wsPort" readonly><button id="copyPort" class="button button-secondary" type="button">Kopyala</button></div></label></div>
             <label for="organizationCode" class="secret-label">Kurum kodu <span class="label-hint">Yalnızca oluşturulunca veya yenilenince gösterilir</span></label><div class="input-actions"><input id="organizationCode" type="password" readonly placeholder="Gizli · kayıpsa yenileyin"><button id="toggleCode" class="button button-quiet" type="button" aria-pressed="false" aria-controls="organizationCode" disabled>Göster</button><button id="copyCode" class="button button-secondary" type="button" disabled>Kodu kopyala</button></div>
             <details class="rotate-details"><summary>Kurum kodunu yenile</summary><p>Bu işlem personelin mevcut bağlantısını keser. Yeni kodu herkese yeniden iletmeniz gerekir.</p><form id="rotateForm" class="inline-form"><label for="rotatePassword">Yönetici parolası<input id="rotatePassword" type="password" autocomplete="current-password" required></label><button class="button button-danger-outline" type="submit">Kodu yenile</button></form></details>
+            <details class="rotate-details"><summary>Kurulum ve bağlantı onarımı</summary><p>Hub açılış görevi veya güvenlik duvarı kuralı bozulduysa Hub bilgisayarındaki PortalTakip Hub.exe dosyasını yeniden açın ve Windows yönetici iznini onaylayın. Mevcut personel, hesap ve parola ayarları korunur. Port çakışmasında uygulamanın gösterdiği PID'ye ait programı kapatıp tekrar deneyin. Personel bağlanamıyorsa Windows ağ profilinin Özel olduğunu kontrol edin. Ağ adresi değiştiyse yukarıdaki yeni LAN adresini personele iletin.</p></details>
           </section>
 
           <section class="surface account-section" aria-labelledby="accountTitle">
-            <div class="surface-heading"><div><span class="eyebrow">HESAP BAZLI SIRA</span><h2 id="accountTitle">Ortak hesap kodu</h2></div></div>
-            <p class="section-intro">Aynı portal hesabıyla çalışan herkese aynı kodu verin. Farklı hesaplar için ayrı kod üretin.</p>
-            <div class="guidance"><span aria-hidden="true">i</span><p>Kod rastgele tanımlayıcıdır. Mükellef numarası, T.C. kimlik numarası veya portal şifresi girmeyin.</p></div>
-            <button id="generateAccountCode" class="button button-secondary" type="button">Yeni hesap kodu üret</button>
-            <div id="accountCodeResult" class="secret-result" hidden><span class="eyebrow">YENİ ÜRETİLEN KOD</span><label for="accountCode">Paylaşılacak ortak hesap kodu</label><div class="input-actions"><textarea id="accountCode" rows="2" spellcheck="false" readonly></textarea><button id="copyAccountCode" class="button button-primary" type="button">Bu kodu kopyala</button></div><p>Bu kodu aynı hesabı kullanan personelin hepsine aynı şekilde iletin.</p></div>
+            <div class="surface-heading"><div><span class="eyebrow">HESAP BAZLI SIRA</span><h2 id="accountTitle">Yönetilen hesaplar</h2></div></div>
+            <p class="section-intro">Portal hesabına kişisel bilgi içermeyen bir ad verin, kullanacak personeli seçin. Hub sabit bir ortak kod üretir; atanan personel hesabı kapsüldeki listede görür.</p>
+            <div class="guidance"><span aria-hidden="true">i</span><p>Görünen ada mükellef numarası, kişi adı, T.C. kimlik numarası veya portal şifresi girmeyin. Erişim kaldırıldığında o kişinin kilidi ve sıra yeri hemen silinir; sıradaki kişiye FIFO devredilir.</p></div>
+            <form id="accountForm" class="form-stack compact-form">
+              <label for="accountPortal">Portal</label><select id="accountPortal"><option>GİB</option><option>SGK</option></select>
+              <label for="accountLabel">Görünen ad</label><input id="accountLabel" maxlength="60" placeholder="Örneğin: Genel hesap A" required>
+              <fieldset><legend>Kullanabilecek personel</legend><div id="newAccountStaff" class="account-staff"></div></fieldset>
+              <button class="button button-primary" type="submit">Hesap oluştur</button>
+            </form>
+            <div id="accountList" class="account-list" aria-live="polite"></div>
+            <div id="legacyMigration" class="subsection" hidden>
+              <h3>Eski yerel kodları eşleştir</h3>
+              <p>1.0 eklentisindeki portal ve kodu aynen girin; Hub kodu değiştirmez, etkin kilit veya sırayı taşımaz. Aynı hesabı kullanan tüm personeli atayın.</p>
+              <form id="importAccountForm" class="form-stack compact-form">
+                <label for="importPortal">Portal</label><select id="importPortal"><option>GİB</option><option>SGK</option></select>
+                <label for="importLabel">Görünen ad</label><input id="importLabel" maxlength="60" required>
+                <label for="importCode">Mevcut ortak hesap kodu</label><input id="importCode" minlength="16" maxlength="128" autocomplete="off" spellcheck="false" required>
+                <fieldset><legend>Kullanabilecek personel</legend><div id="importAccountStaff" class="account-staff"></div></fieldset>
+                <button class="button button-secondary" type="submit">Kodu eşleştir</button>
+              </form>
+              <p>Herkesin kullandığı kodları eşleştirdikten sonra eski elle kullanımını kapatın. Eşleşmemiş etkin kilit veya kuyruk varsa Hub kapatmayı reddeder.</p>
+              <button id="enforceAccounts" class="button button-danger-outline" type="button">Eski elle kullanımı kapat</button>
+            </div>
           </section>
         </div>
       </div>

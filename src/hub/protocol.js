@@ -26,15 +26,22 @@ export function validPortal(value) {
 
 export function validateClientMessage(value, authenticated) {
   if (!authenticated) {
-    if (!exactObject(value, ['type', 'organizationCode', 'staffToken'], ['lastHubId']) ||
-        value.type !== 'HELLO' || typeof value.organizationCode !== 'string' ||
-        typeof value.staffToken !== 'string' ||
-        !secret.test(value.organizationCode) || !secret.test(value.staffToken) ||
-        (value.lastHubId !== undefined &&
-          (typeof value.lastHubId !== 'string' || !uuid.test(value.lastHubId)))) {
+    if (value?.type !== 'HELLO' ||
+        (value.lastHubId !== undefined && !validRequestId(value.lastHubId))) {
       return {ok: false, code: 'INVALID_HELLO'};
     }
-    return {ok: true, value};
+    if (exactObject(value, ['type', 'organizationCode', 'staffToken'], ['lastHubId']) &&
+        typeof value.organizationCode === 'string' && typeof value.staffToken === 'string' &&
+        secret.test(value.organizationCode) && secret.test(value.staffToken)) {
+      return {ok: true, value, authKind: 'legacy'};
+    }
+    if (exactObject(value, ['type', 'inviteToken'], ['lastHubId']) &&
+        typeof value.inviteToken === 'string' &&
+        secret.test(value.inviteToken)) return {ok: true, value, authKind: 'invite'};
+    if (exactObject(value, ['type', 'deviceToken'], ['lastHubId']) &&
+        typeof value.deviceToken === 'string' &&
+        secret.test(value.deviceToken)) return {ok: true, value, authKind: 'device'};
+    return {ok: false, code: 'INVALID_HELLO'};
   }
   if (exactObject(value, ['type'], ['requestId']) && value.type === 'STATE' &&
       (value.requestId === undefined || validRequestId(value.requestId))) {

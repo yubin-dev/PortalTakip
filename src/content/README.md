@@ -4,7 +4,9 @@
 
 ## Ortak hesap seçimi
 
-Yönetici, **her portal hesabı için ayrı**, rastgele ve anlamsız en az 16 karakterlik ortak kod üretip yalnızca o hesabı kullanan personele güvenli bir kurum içi kanaldan dağıtır. Çalışan kapsülde `Ortak hesap kodu ekle` ile açıklayıcı bir takma ad ve kodu girip seçer; sonra aktif kod kapsülde görünür. Aynı portal hesabını kullanan herkes **aynı kodu** ekleyip seçmelidir; farklı hesabın kodu ayrı olmalıdır. Kod seçilmeden `ACQUIRE` düğmesi kapalıdır; background da isteği reddeder. Portal şifresi, vergi/T.C. kimlik numarası ve diğer mükellef verileri kod veya takma ad olarak kullanılmamalıdır. Yönetici panelinde kod üretme/dağıtma arayüzü henüz yoktur; bu adım yöneticinin sorumluluğundadır.
+Yönetici panelinde portal hesabına hassas bilgi içermeyen görünen ad verip kullanacak personelleri seçer. Hub'ın ürettiği sabit ortak kod yalnızca atananlara `STATE` ile gelir; kapsül bu hesapları listeler. Personel hesabı seçip mevcut kilit/sıra düğmelerini kullanır. Atama değişince liste aynı bağlantıda yenilenir. Kod seçilmeden `ACQUIRE` kapalıdır; Hub atanmadığı kodla işlemi ayrıca reddeder. Portal şifresi, vergi/T.C. kimlik numarası ve diğer mükellef verileri görünen ad veya kod olarak kullanılmamalıdır.
+
+Eski 1.0 kurulumlarında `Ortak hesap kodu ekle` geçiş süresince görünür. Yönetici eski portal+kodları panelde aynen eşleştirir; eşleşen yerel seçim aynı kodu kullanmaya devam eder. Yönetici **Eski elle kullanımı kapat** dediğinde elle ekleme gizlenir ve Hub bilinmeyen kodları reddeder. Eski yerel liste sessizce değiştirilmez veya silinmez.
 
 Kodlar ve sekme seçimleri yalnızca `chrome.storage.session` içinde tutulur; tarayıcı oturumu kapanınca tekrar girilir. Aynı Chrome profilini kullanan kişiler bu seçimlere erişebilir. Paylaşılan bilgisayarda ayrı profiller kullanılmalı ve iş bitince bağlantı kesilmelidir. Kapsül yalnızca **seçili** ortak hesap kodunu gösterir; diğer hesapların listesi takma adlardan oluşur. Ortak hesap kodu bir parola veya yetkilendirme belirteci olarak değerlendirilmemelidir.
 

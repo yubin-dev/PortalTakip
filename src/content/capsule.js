@@ -144,6 +144,7 @@
     if (!next?.view || !Array.isArray(next.accounts)) return;
     payload = next;
     const {view, accounts} = next;
+    accountDetails.hidden = next.legacyAllowed !== true;
     const old = accountSelect.value;
     accountSelect.replaceChildren();
     const placeholder = make('option', accountSelect, '', 'Hesap seçin');

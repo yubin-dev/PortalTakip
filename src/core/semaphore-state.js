@@ -6,7 +6,7 @@
  * @typedef {{organizationId: string, portal: 'GİB'|'SGK', accountCode: string}} Key
  * @typedef {{ok: false, code: string}} Failure
  * @typedef {{ok: true, status: 'held'|'queued'|'stale'|'released'|'cancelled'|
- *   'disconnected'|'confirmed'|'unlocked'|'kicked'|'readmitted'|'noop',
+ *   'disconnected'|'confirmed'|'unlocked'|'kicked'|'readmitted'|'revoked'|'noop',
  *   key?: Key, position?: number, affected?: number}} Success
  * @typedef {Success|Failure} OperationResult
  * @typedef {{userId: string, displayName: string, connected: boolean,
@@ -416,6 +416,20 @@ export function createSemaphoreState(options = {}) {
     return {ok: true, status: removed ? 'readmitted' : 'noop'};
   }
 
+  /** Revokes one user's position in one account; a removed holder passes to FIFO next. */
+  function revokeAccountAccess(input) {
+    sweep();
+    const parsed = parseKey(input);
+    if (parsed.error) return {ok: false, code: parsed.error};
+    if (!adminAuthorized(input, parsed.key)) return {ok: false, code: 'ADMIN_REQUIRED'};
+    const userId = own(input?.userId);
+    if (!userId) return {ok: false, code: 'INVALID_IDENTITY'};
+    const lock = locks.get(keyId(parsed.key));
+    const affected = lock ? removeUserFromLock(lock, userId,
+      parsed.key.organizationId, 'access_revoked') : 0;
+    return {ok: true, status: affected ? 'revoked' : 'noop', key: parsed.key, affected};
+  }
+
   /** @returns {Snapshot} */
   function getSnapshot(filter = {}) {
     sweep();
@@ -505,5 +519,7 @@ export function createSemaphoreState(options = {}) {
     confirmPresence: idempotent('confirmPresence', confirmPresence),
     forceUnlock: idempotent('forceUnlock', forceUnlock),
     kick: idempotent('kick', kick),
-    readmitUser: idempotent('readmitUser', readmitUser), getSnapshot, isKicked, dispose};
+    readmitUser: idempotent('readmitUser', readmitUser),
+    revokeAccountAccess: idempotent('revokeAccountAccess', revokeAccountAccess),
+    getSnapshot, isKicked, dispose};
 }

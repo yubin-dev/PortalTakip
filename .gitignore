@@ -10,3 +10,4 @@ data/
 artifacts/
 hub.json
 setup-key.txt
+network-state.json

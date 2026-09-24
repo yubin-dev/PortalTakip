@@ -4,11 +4,12 @@ import {networkInterfaces} from 'node:os';
 import WebSocket, {WebSocketServer} from 'ws';
 import {createSemaphoreState} from '../core/semaphore-state.js';
 import {completeSetup, defaultConfigPath, digest, discardSetupKey, hashPassword, matches, newSecret, readConfig,
-  saveConfig, verifyPassword} from './config.js';
+  saveConfig, upgradeAuthConfig, verifyPassword} from './config.js';
 import {readAdminAsset} from './admin-assets.js';
 import {MAX_ADMIN_BYTES, MAX_WS_BYTES, exactObject, validAccountCode,
   validPortal, validRequestId, validateClientMessage} from './protocol.js';
 import {createRateLimiter} from './rate-limit.js';
+import {acknowledgeNetwork, networkStatus} from './network-state.js';
 
 const adminFiles = new Map([
   ['/', ['admin/index.html', 'text/html; charset=utf-8']],
@@ -17,6 +18,7 @@ const adminFiles = new Map([
 ]);
 const SESSION_IDLE_MS = 30 * 60_000;
 const SESSION_ABSOLUTE_MS = 8 * 60 * 60_000;
+const INVITE_TTL_MS = 10 * 60_000;
 
 function json(response, status, body, headers = {}) {
   response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', ...headers});
@@ -62,6 +64,16 @@ function closeServer(server) {
 export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.0',
   wsPort = 8787, adminPort = 8788, stateClock = {}} = {}) {
   let config = readConfig(configPath);
+  const upgraded = upgradeAuthConfig(config);
+  if (upgraded !== config) {
+    saveConfig(configPath, upgraded); // retain old staff hashes and organization code
+    config = upgraded;
+  }
+  const authNow = () => stateClock.now?.() ?? Date.now();
+  const lanAddresses = () => [...new Set(Object.values(networkInterfaces()).flatMap((entries) =>
+    (entries ?? []).filter((entry) => entry.family === 'IPv4' && !entry.internal)
+      .map((entry) => entry.address)))];
+  networkStatus(configPath, lanAddresses());
   const hubId = randomUUID(); // changes on every process start; all core state is new RAM
   const limiter = createRateLimiter();
   const adminSessions = new Map();
@@ -103,10 +115,21 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
 
   function sendState(client, reason, requestId, reset = false) {
     if (!client.auth) return;
+    const assigned = config.accounts.filter((account) =>
+      account.assignedUserIds.includes(client.auth.userId));
+    const allowed = new Set(assigned.map((account) =>
+      JSON.stringify([account.portal, account.code])));
+    const locks = state.getSnapshot({organizationId: config.organizationId}).locks.filter((lock) =>
+      allowed.has(JSON.stringify([lock.key.portal, lock.key.accountCode])) ||
+      (config.legacyAllowed && !config.accounts.some((account) =>
+        account.portal === lock.key.portal && account.code === lock.key.accountCode) &&
+        (lock.holder?.userId === client.auth.userId ||
+          lock.queue.some((entry) => entry.userId === client.auth.userId))));
     send(client.ws, {type: 'STATE', hubId, serverTime: stateClock.now?.() ?? Date.now(),
       organizationId: config.organizationId,
       reason, reset, ...(requestId ? {requestId} : {}),
-      ...state.getSnapshot({organizationId: config.organizationId})});
+      accounts: assigned.map(({id, portal, label, code}) => ({id, portal, label, code})),
+      legacyAllowed: config.legacyAllowed, locks});
   }
 
   function scheduleBroadcast() {
@@ -119,7 +142,18 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
     });
   }
 
-  const lanServer = createServer({maxHeaderSize: 8192}, (_request, response) => {
+  const lanServer = createServer({maxHeaderSize: 8192}, (request, response) => {
+    if (request.method === 'GET' && request.url === '/invite' && config.state === 'ready') {
+      response.writeHead(200, {'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"});
+      response.end('<!doctype html><html lang="tr"><meta charset="utf-8"><title>PortalTakip daveti</title>' +
+        '<h1>PortalTakip personel daveti</h1><p>Chrome eklentisini açın ve bu sayfanın adresindeki ' +
+        'davet bağlantısını “Davet bağlantısını yapıştır” alanına yapıştırın.</p>' +
+        '<p>Bağlantı 10 dakika geçerlidir ve yalnızca bir kez kullanılabilir. ' +
+        'Bu sayfa eklentiye otomatik veri aktarmaz.</p></html>');
+      return;
+    }
     response.writeHead(404, {'Content-Type': 'text/plain; charset=utf-8'});
     response.end('Not found');
   });
@@ -179,22 +213,57 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
         return;
       }
       if (!client.auth) {
-        if (!limiter.allow('hello', ip, 20) ||
-            !matches(message.organizationCode, config.organizationCodeHash)) {
+        if (!limiter.allow('hello', ip, 20)) {
           send(ws, {type: 'ERROR', code: 'AUTH_FAILED'});
           ws.close(4003, 'AUTH_FAILED');
           return;
         }
-        const staff = config.staff.find((entry) => matches(message.staffToken, entry.tokenHash));
+        let staff;
+        let device;
+        let invitation;
+        let deviceToken;
+        if (validated.authKind === 'legacy') {
+          if (matches(message.organizationCode, config.organizationCodeHash)) {
+            staff = config.staff.find((entry) => matches(message.staffToken, entry.tokenHash));
+          }
+        } else if (validated.authKind === 'device') {
+          device = config.devices.find((entry) => matches(message.deviceToken, entry.tokenHash));
+          if (device?.revokedAt) {
+            send(ws, {type: 'ERROR', code: 'DEVICE_REVOKED'});
+            ws.close(4003, 'DEVICE_REVOKED');
+            return;
+          }
+          staff = config.staff.find((entry) => entry.userId === device?.userId);
+        } else if (limiter.allow('invite-redeem', ip, 10)) {
+          invitation = config.invitations.find((entry) =>
+            matches(message.inviteToken, entry.tokenHash));
+          if (invitation && authNow() < invitation.expiresAt) {
+            staff = config.staff.find((entry) => entry.userId === invitation.userId);
+          }
+        }
         if (!staff) {
-          send(ws, {type: 'ERROR', code: 'AUTH_FAILED'});
-          ws.close(4003, 'AUTH_FAILED');
+          const code = validated.authKind === 'invite' ? 'INVITE_INVALID' : 'AUTH_FAILED';
+          send(ws, {type: 'ERROR', code});
+          ws.close(4003, code);
           return;
         }
         if (state.isKicked({organizationId: config.organizationId, userId: staff.userId})) {
           send(ws, {type: 'ERROR', code: 'KICKED'});
           ws.close(4003, 'KICKED');
           return;
+        }
+        if (invitation) {
+          deviceToken = newSecret();
+          device = {deviceId: randomUUID(), userId: staff.userId,
+            tokenHash: digest(deviceToken), createdAt: authNow(), revokedAt: null};
+          const next = {...config,
+            invitations: config.invitations.filter((entry) => entry !== invitation),
+            devices: [...config.devices, device]};
+          try { saveConfig(configPath, next); config = next; } catch {
+            send(ws, {type: 'ERROR', code: 'SERVER_ERROR'});
+            ws.close(1011, 'SERVER_ERROR');
+            return;
+          }
         }
         clearTimeout(helloTimer);
         const old = activeByUser.get(staff.userId);
@@ -205,12 +274,14 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
           old.ws.close(4000, 'REPLACED');
         }
         client.auth = {userId: staff.userId, displayName: staff.displayName,
-          organizationId: config.organizationId, socketId: client.socketId};
+          organizationId: config.organizationId, socketId: client.socketId,
+          deviceId: device?.deviceId ?? null};
         activeByUser.set(staff.userId, client);
         activeBySocket.set(client.socketId, client);
         const reset = message.lastHubId !== hubId;
         send(ws, {type: 'HELLO', status: 'ok', hubId, connectionId: client.socketId,
-          userId: staff.userId, displayName: staff.displayName, stateReset: reset});
+          userId: staff.userId, displayName: staff.displayName, stateReset: reset,
+          ...(deviceToken ? {deviceToken} : {})});
         sendState(client, 'HELLO', undefined, reset);
         return;
       }
@@ -220,6 +291,13 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
       }
       const input = {...client.auth, portal: message.portal,
         accountCode: message.accountCode, requestId: message.requestId};
+      const knownAccount = config.accounts.find((account) =>
+        account.portal === message.portal && account.code === message.accountCode);
+      if ((knownAccount && !knownAccount.assignedUserIds.includes(client.auth.userId)) ||
+          (!knownAccount && !config.legacyAllowed)) {
+        send(ws, {type: 'ERROR', requestId: message.requestId, code: 'ACCOUNT_FORBIDDEN'});
+        return;
+      }
       const method = {ACQUIRE: 'acquire', RELEASE: 'release',
         CANCEL: 'cancel', CONFIRM: 'confirmPresence'}[message.type];
       const result = state[method](input);
@@ -333,9 +411,8 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
           json(response, 401, {error: 'AUTH_FAILED'});
           return;
         }
-        if (config.version === 1) {
-          const migrated = {...config, version: 2, state: 'ready',
-            organizationName: 'Kurum', adminPasswordHash: hashPassword(body.password)};
+        if (/^[a-f0-9]{64}$/.test(config.adminPasswordHash)) {
+          const migrated = {...config, adminPasswordHash: hashPassword(body.password)};
           saveConfig(configPath, migrated);
           config = migrated;
         }
@@ -350,16 +427,20 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
       }
       if (!validSession) { json(response, 401, {error: 'ADMIN_REQUIRED'}); return; }
       if (request.method === 'GET' && pathname === '/api/state') {
-        const lanAddresses = Object.values(networkInterfaces()).flatMap((entries) =>
-          (entries ?? []).filter((entry) => entry.family === 'IPv4' && !entry.internal)
-            .map((entry) => entry.address));
+        const addresses = lanAddresses();
         json(response, 200, {hubId, serverTime: stateClock.now?.() ?? Date.now(), organizationId: config.organizationId,
           organizationName: config.organizationName ?? 'Kurum', wsPort: lanServer.address().port,
-          lanAddresses: [...new Set(lanAddresses)],
+          lanAddresses: addresses, network: networkStatus(configPath, addresses),
           clients: activeBySocket.size,
           staff: config.staff.map(({userId, displayName, disabled}) =>
             ({userId, displayName, disabled: disabled === true,
-              connected: activeByUser.has(userId)})),
+              connected: activeByUser.has(userId),
+              devices: config.devices.filter((device) => device.userId === userId)
+                .map(({deviceId, createdAt, revokedAt}) =>
+                  ({deviceId, createdAt, revokedAt}))})),
+          accounts: config.accounts.map(({id, portal, label, code, assignedUserIds}) =>
+            ({id, portal, label, code, assignedUserIds})),
+          legacyAllowed: config.legacyAllowed,
           ...state.getSnapshot({organizationId: config.organizationId})});
         return;
       }
@@ -375,18 +456,24 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
           'portal_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});
         return;
       }
+      if (pathname === '/api/network/acknowledge') {
+        if (!exactObject(body, [])) { json(response, 400, {error: 'INVALID_MESSAGE'}); return; }
+        acknowledgeNetwork(configPath, lanAddresses());
+        json(response, 200, {ok: true});
+        return;
+      }
       if (pathname === '/api/organization-code/rotate') {
         if (!exactObject(body, ['password']) ||
             !verifyPassword(body.password, config.adminPasswordHash)) {
           json(response, 403, {error: 'AUTH_FAILED'}); return;
         }
         const organizationCode = newSecret();
-        const previousHash = config.organizationCodeHash;
-        config.organizationCodeHash = digest(organizationCode);
-        try { saveConfig(configPath, config); } catch (error) {
-          config.organizationCodeHash = previousHash;
-          throw error;
-        }
+        const now = authNow();
+        const next = {...config, organizationCodeHash: digest(organizationCode),
+          invitations: [], devices: config.devices.map((device) =>
+            ({...device, revokedAt: device.revokedAt ?? now}))};
+        saveConfig(configPath, next);
+        config = next;
         for (const client of activeBySocket.values()) {
           state.disconnect({socketId: client.socketId});
           client.auth = null;
@@ -402,7 +489,81 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
       }
       if (pathname === '/api/account-code') {
         if (!exactObject(body, [])) { json(response, 400, {error: 'INVALID_MESSAGE'}); return; }
+        if (!config.legacyAllowed) { json(response, 409, {error: 'MANAGED_ACCOUNTS_ONLY'}); return; }
         json(response, 200, {accountCode: `acct_${newSecret()}`});
+        return;
+      }
+      if (pathname === '/api/accounts' || pathname === '/api/accounts/import') {
+        const importing = pathname.endsWith('/import');
+        if (!exactObject(body, importing ? ['portal', 'label', 'accountCode', 'assignedUserIds'] :
+          ['portal', 'label', 'assignedUserIds']) || !validPortal(body.portal) ||
+          typeof body.label !== 'string' || body.label.trim().length < 1 ||
+          body.label.trim().length > 60 || /[\u0000-\u001f]/.test(body.label) ||
+          !Array.isArray(body.assignedUserIds) || body.assignedUserIds.length > config.staff.length ||
+          new Set(body.assignedUserIds).size !== body.assignedUserIds.length ||
+          !body.assignedUserIds.every((id) => config.staff.some((staff) => staff.userId === id)) ||
+          (importing && !validAccountCode(body.accountCode))) {
+          json(response, 400, {error: 'INVALID_ACCOUNT'}); return;
+        }
+        const code = importing ? body.accountCode : `acct_${newSecret()}`;
+        if (config.accounts.some((account) => account.portal === body.portal && account.code === code)) {
+          json(response, 409, {error: 'ACCOUNT_EXISTS'}); return;
+        }
+        if (importing) {
+          const active = state.getSnapshot({organizationId: config.organizationId,
+            portal: body.portal, accountCode: code}).locks[0];
+          const participants = [active?.holder, ...(active?.queue ?? [])].filter(Boolean);
+          if (participants.some((entry) => !body.assignedUserIds.includes(entry.userId))) {
+            json(response, 409, {error: 'ASSIGN_ACTIVE_USERS_FIRST'}); return;
+          }
+        }
+        const account = {id: randomUUID(), portal: body.portal, label: body.label.trim(),
+          code, assignedUserIds: body.assignedUserIds};
+        const next = {...config, accounts: [...config.accounts, account]};
+        saveConfig(configPath, next);
+        config = next;
+        scheduleBroadcast();
+        json(response, 201, {account});
+        return;
+      }
+      if (pathname === '/api/accounts/assign') {
+        if (!exactObject(body, ['accountId', 'assignedUserIds']) ||
+            !validRequestId(body.accountId) || !Array.isArray(body.assignedUserIds) ||
+            body.assignedUserIds.length > config.staff.length ||
+            new Set(body.assignedUserIds).size !== body.assignedUserIds.length ||
+            !body.assignedUserIds.every((id) => config.staff.some((staff) => staff.userId === id))) {
+          json(response, 400, {error: 'INVALID_ACCOUNT'}); return;
+        }
+        const account = config.accounts.find((entry) => entry.id === body.accountId);
+        if (!account) { json(response, 404, {error: 'ACCOUNT_NOT_FOUND'}); return; }
+        const removed = account.assignedUserIds.filter((id) => !body.assignedUserIds.includes(id));
+        const next = {...config, accounts: config.accounts.map((entry) =>
+          entry.id === account.id ? {...entry, assignedUserIds: body.assignedUserIds} : entry)};
+        saveConfig(configPath, next);
+        config = next;
+        for (const userId of removed) {
+          state.revokeAccountAccess({organizationId: config.organizationId,
+            portal: account.portal, accountCode: account.code, userId,
+            requestId: randomUUID(), adminContext: {authorized: true,
+              organizationId: config.organizationId}});
+        }
+        scheduleBroadcast();
+        json(response, 200, {ok: true, removed});
+        return;
+      }
+      if (pathname === '/api/accounts/enforce') {
+        if (!exactObject(body, []) || !config.legacyAllowed) {
+          json(response, 400, {error: 'INVALID_MESSAGE'}); return;
+        }
+        const unknown = state.getSnapshot({organizationId: config.organizationId}).locks.some((lock) =>
+          !config.accounts.some((account) => account.portal === lock.key.portal &&
+            account.code === lock.key.accountCode));
+        if (unknown) { json(response, 409, {error: 'IMPORT_ACTIVE_ACCOUNTS_FIRST'}); return; }
+        const next = {...config, legacyAllowed: false};
+        saveConfig(configPath, next);
+        config = next;
+        scheduleBroadcast();
+        json(response, 200, {ok: true});
         return;
       }
       if (pathname === '/api/staff') {
@@ -419,6 +580,62 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
           throw error;
         }
         json(response, 201, {userId: staff.userId, displayName: staff.displayName, staffToken});
+        return;
+      }
+      if (pathname === '/api/invitations') {
+        if (!exactObject(body, ['userId']) || !validRequestId(body.userId)) {
+          json(response, 400, {error: 'INVALID_USER'}); return;
+        }
+        const staff = config.staff.find((entry) => entry.userId === body.userId);
+        if (!staff || staff.disabled || !limiter.allow('invite-create',
+          request.socket.remoteAddress, 20)) {
+          json(response, staff?.disabled ? 409 : !staff ? 404 : 429,
+            {error: staff?.disabled ? 'STAFF_DISABLED' : !staff ? 'INVALID_USER' : 'RATE_LIMIT'});
+          return;
+        }
+        const inviteToken = newSecret();
+        const expiresAt = authNow() + INVITE_TTL_MS;
+        const next = {...config, invitations: [
+          ...config.invitations.filter((entry) =>
+            entry.expiresAt > authNow() && entry.userId !== staff.userId),
+          {userId: staff.userId, tokenHash: digest(inviteToken), expiresAt}]};
+        saveConfig(configPath, next);
+        config = next;
+        json(response, 201, {userId: staff.userId, inviteToken, expiresAt});
+        return;
+      }
+      if (pathname === '/api/devices/revoke') {
+        if (!exactObject(body, ['deviceId']) || !validRequestId(body.deviceId)) {
+          json(response, 400, {error: 'INVALID_DEVICE'}); return;
+        }
+        const device = config.devices.find((entry) => entry.deviceId === body.deviceId);
+        if (!device) { json(response, 404, {error: 'INVALID_DEVICE'}); return; }
+        if (!device.revokedAt) {
+          const next = {...config, devices: config.devices.map((entry) =>
+            entry.deviceId === device.deviceId ? {...entry, revokedAt: authNow()} : entry)};
+          saveConfig(configPath, next);
+          config = next;
+          for (const client of activeBySocket.values()) {
+            if (client.auth.deviceId !== device.deviceId) continue;
+            const snapshot = state.getSnapshot({organizationId: config.organizationId});
+            for (const lock of snapshot.locks) {
+              const common = {...client.auth, portal: lock.key.portal,
+                accountCode: lock.key.accountCode, requestId: randomUUID()};
+              if (lock.holder?.userId === client.auth.userId) state.release(common);
+              else if (lock.queue.some((entry) => entry.userId === client.auth.userId)) {
+                state.cancel(common);
+              }
+            }
+            activeBySocket.delete(client.socketId);
+            activeByUser.delete(client.auth.userId);
+            state.disconnect({socketId: client.socketId});
+            client.auth = null;
+            send(client.ws, {type: 'ERROR', code: 'DEVICE_REVOKED'});
+            client.ws.close(4003, 'DEVICE_REVOKED');
+          }
+          scheduleBroadcast();
+        }
+        json(response, 200, {ok: true, deviceId: device.deviceId});
         return;
       }
       if (pathname === '/api/force-unlock') {
@@ -448,6 +665,8 @@ export async function startHub({configPath = defaultConfigPath, wsHost = '0.0.0.
             userId: staff.userId});
           if (staff.disabled !== disabled) {
             staff.disabled = disabled;
+            if (disabled) config.invitations = config.invitations.filter((entry) =>
+              entry.userId !== staff.userId);
             saveConfig(configPath, config);
           }
           scheduleBroadcast();

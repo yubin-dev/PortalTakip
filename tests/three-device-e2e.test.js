@@ -133,9 +133,13 @@ test('two LAN staff clients and loopback admin complete setup, FIFO, presence, r
     const staffB = await post('/api/staff', {displayName: 'B'}, cookie, csrf);
     assert.equal(staffA.status, 201);
     assert.equal(staffB.status, 201);
-    const gibCode = (await post('/api/account-code', {}, cookie, csrf)).data.accountCode;
-    const otherCode = (await post('/api/account-code', {}, cookie, csrf)).data.accountCode;
-    const sgkCode = (await post('/api/account-code', {}, cookie, csrf)).data.accountCode;
+    const assignedUserIds = [staffA.data.userId, staffB.data.userId];
+    const gibCode = (await post('/api/accounts', {portal: 'GİB', label: 'Genel A',
+      assignedUserIds}, cookie, csrf)).data.account.code;
+    const otherCode = (await post('/api/accounts', {portal: 'GİB', label: 'Genel B',
+      assignedUserIds}, cookie, csrf)).data.account.code;
+    const sgkCode = (await post('/api/accounts', {portal: 'SGK', label: 'Bordro A',
+      assignedUserIds}, cookie, csrf)).data.account.code;
     const bad = await person(wsAddress, hub.wsPort, 'x'.repeat(43), staffA.data.staffToken);
     sockets.push(bad.ws);
     assert.equal(bad.hello.code, 'AUTH_FAILED');

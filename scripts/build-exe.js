@@ -21,6 +21,7 @@ writeFileSync(configuration, JSON.stringify({
   disableExperimentalSEAWarning: true,
   useSnapshot: false, useCodeCache: false,
   assets: {
+    'scripts/install-windows.ps1': resolve('scripts/install-windows.ps1'),
     'admin/index.html': resolve('src/hub/admin/index.html'),
     'admin/app.js': resolve('src/hub/admin/app.js'),
     'admin/style.css': resolve('src/hub/admin/style.css'),

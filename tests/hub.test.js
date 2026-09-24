@@ -129,8 +129,8 @@ test('Hub authenticates staff, isolates admin actions, broadcasts state, and sig
   send(b.ws, {type: 'HELLO', organizationCode, staffToken: staffB.data.staffToken,
     lastHubId: helloA.hubId});
   assert.equal((await b.messages.until((message) => message.type === 'HELLO')).stateReset, false);
-  assert.equal((await b.messages.until((message) => message.type === 'STATE')).locks[0].holder.userId,
-    staffA.data.userId);
+  // Legacy codes remain usable, but another person's code is not disclosed before participation.
+  assert.deepEqual((await b.messages.until((message) => message.type === 'STATE')).locks, []);
   const secondRequest = randomUUID();
   send(b.ws, {type: 'ACQUIRE', portal: 'GİB', accountCode: code, requestId: secondRequest});
   assert.equal((await b.messages.until((message) => message.requestId === secondRequest)).status,

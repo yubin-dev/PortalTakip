@@ -68,3 +68,38 @@ export function validateConnectionInput(input) {
 export function websocketUrl(config) {
   return `ws://${config.host}:${config.port}/ws`;
 }
+
+export function validateInvitationLink(value) {
+  if (typeof value !== 'string' || value.length > 512) {
+    return invalid('invitationLink', 'Davet bağlantısı geçersiz.');
+  }
+  let url;
+  try { url = new URL(value.trim()); } catch {
+    return invalid('invitationLink', 'Davet bağlantısı geçersiz.');
+  }
+  const parameters = new URLSearchParams(url.hash.slice(1));
+  const host = normalizeLanHost(url.hostname);
+  const port = Number(url.port || 80);
+  if (url.protocol !== 'http:' || url.pathname !== '/invite' || url.search ||
+      url.username || url.password || !host || port < 1 || port > 65535 ||
+      [...parameters.keys()].length !== 1 ||
+      !secretPattern.test(parameters.get('invite') ?? '')) {
+    return invalid('invitationLink', 'Yalnızca geçerli yerel Hub davet bağlantısını yapıştırın.');
+  }
+  return {ok: true, value: {host, port, inviteToken: parameters.get('invite')}};
+}
+
+export function validateDeviceConnectionInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      value.authKind !== 'device' || typeof value.deviceToken !== 'string' ||
+      !secretPattern.test(value.deviceToken)) {
+    return invalid('deviceToken', 'Cihaz erişim anahtarı geçersiz.');
+  }
+  const host = normalizeLanHost(value.host);
+  const port = Number(value.port);
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return invalid('host', 'Hub adresi veya portu geçersiz.');
+  }
+  return {ok: true, value: {authKind: 'device', host, port,
+    deviceToken: value.deviceToken}};
+}

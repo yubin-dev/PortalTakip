@@ -22,6 +22,14 @@ header p { color: #8e9eb4; font-size: 11px; margin: 3px 0 0; }
 .state-grid span { color: #94abc2; font-size: 11px; font-weight: 700; }
 .state-grid strong { font-size: 11px; font-weight: 600; }
 form { display: grid; gap: 11px; }
+#inviteForm { padding: 12px; margin-bottom: 12px; border: 1px solid #2d5260; border-radius: 10px; background: #142c36; }
+#inviteConnectButton { width: 100%; color: #0b1d22; background: #71d7c2; }
+#inviteConnectButton:hover:not(:disabled) { background: #8cebd5; }
+.remember-option { justify-content: flex-start; align-items: center; gap: 7px; margin: 0; }
+.remember-option input { width: 16px; height: 16px; }
+#manualConnection { padding: 10px 0; border-top: 1px solid #304158; }
+#manualConnection summary { cursor: pointer; color: #b9d5e8; font-weight: 700; }
+#connectionForm { margin-top: 12px; }
 .field-row { min-width: 0; }
 label { display: flex; justify-content: space-between; margin-bottom: 5px; color: #d9e4f1; font-size: 11px; font-weight: 700; }
 label small { color: #7f93aa; font-weight: 400; }
@@ -38,6 +46,7 @@ button:disabled { opacity: .55; cursor: wait; }
 #connectButton { flex: 1; color: #0b1d22; background: #71d7c2; }
 #connectButton:hover:not(:disabled) { background: #8cebd5; }
 #disconnectButton { flex: 1; color: #d5e2ef; background: #26374c; }
+#disconnectButton { width: 100%; margin-top: 10px; }
 #disconnectButton:hover:not(:disabled) { background: #32465e; }
 .message { min-height: 14px; margin: 10px 0 0; color: #ffbaae; font-size: 11px; line-height: 1.4; }
 footer { margin: 10px 0 0; color: #71849d; font-size: 10px; line-height: 1.45; }

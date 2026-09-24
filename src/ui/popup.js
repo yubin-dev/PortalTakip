@@ -1,4 +1,4 @@
-import {validateConnectionInput} from './connection-input.js';
+import {validateConnectionInput, validateInvitationLink} from './connection-input.js';
 
 const $ = (id) => document.getElementById(id);
 const fields = ['displayName', 'organizationName', 'host', 'port',
@@ -13,6 +13,7 @@ function setMessage(text) { $('message').textContent = text; }
 function setBusy(value) {
   busy = value;
   $('connectButton').disabled = value;
+  $('inviteConnectButton').disabled = value;
   $('disconnectButton').disabled = value;
 }
 
@@ -26,6 +27,7 @@ function renderStatus(status) {
     $('sgkStatus').textContent = `${Number(status?.ownSgkHeld) || 0} kilit · ${Number(status?.ownSgkQueued) || 0} sıra`;
     $('organizationCode').value = '';
     $('staffToken').value = '';
+    $('invitationLink').value = '';
   } else {
     $('gibStatus').textContent = '—';
     $('sgkStatus').textContent = '—';
@@ -75,6 +77,28 @@ $('connectionForm').addEventListener('submit', async (event) => {
   finally { setBusy(false); }
 });
 
+$('inviteForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (busy) return;
+  $('invitationLink').removeAttribute('aria-invalid');
+  const result = validateInvitationLink($('invitationLink').value);
+  if (!result.ok) {
+    $('invitationLink').setAttribute('aria-invalid', 'true');
+    $('invitationLink').focus();
+    setMessage(result.message);
+    return;
+  }
+  setBusy(true);
+  setMessage('');
+  try {
+    renderStatus((await request('PT_CONNECT_INVITE', {
+      invitationLink: $('invitationLink').value.trim(),
+      rememberDevice: $('rememberDevice').checked})).status);
+    $('invitationLink').value = '';
+  } catch (error) { setMessage(error.message); }
+  finally { setBusy(false); }
+});
+
 $('disconnectButton').addEventListener('click', async () => {
   if (busy) return;
   setBusy(true);
@@ -83,6 +107,8 @@ $('disconnectButton').addEventListener('click', async () => {
     renderStatus((await request('PT_DISCONNECT')).status);
     $('organizationCode').value = '';
     $('staffToken').value = '';
+    $('invitationLink').value = '';
+    $('rememberDevice').checked = false;
   } catch (error) { setMessage(error.message); }
   finally { setBusy(false); }
 });

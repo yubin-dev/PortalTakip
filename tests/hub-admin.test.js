@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import WebSocket from 'ws';
 import {createPendingConfig, readConfig, verifyPassword} from '../src/hub/config.js';
 import {startHub} from '../src/hub/server.js';
+import {networkStatePath} from '../src/hub/network-state.js';
 
 function messages(ws) {
   const queue = [];
@@ -98,4 +99,11 @@ test('first setup hashes admin password; rotating organization code revokes live
   assert.ok(state.serverTime >= beforeState && state.serverTime <= afterState);
   assert.equal(state.staff[0].connected, true);
   assert.equal(state.wsPort, hub.wsPort);
+  writeFileSync(networkStatePath(configPath), JSON.stringify({addresses: ['192.0.2.10']}));
+  const changed = await (await fetch(`${base}/api/state`, {headers: {Cookie: cookie}})).json();
+  assert.equal(changed.network.changed, true);
+  assert.equal((await post('/api/network/acknowledge', {}, cookie)).response.status, 403);
+  assert.equal((await post('/api/network/acknowledge', {}, cookie, csrf)).response.status, 200);
+  const fixed = await (await fetch(`${base}/api/state`, {headers: {Cookie: cookie}})).json();
+  assert.equal(fixed.network.changed, false);
 });

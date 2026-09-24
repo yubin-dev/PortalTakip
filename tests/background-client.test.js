@@ -37,7 +37,7 @@ test('client replays an uncertain operation with its original requestId after re
         queueMicrotask(() => {
           this.receive({type: 'HELLO', status: 'ok', hubId, userId: 'staff-1'});
           this.receive({type: 'STATE', hubId, serverTime: Date.now(),
-            organizationId: 'org-1', locks: []});
+            organizationId: 'org-1', locks: [], accounts: [], legacyAllowed: true});
         });
       } else if (value.type === 'ACQUIRE') {
         operations.push(value);
@@ -47,7 +47,8 @@ test('client replays an uncertain operation with its original requestId after re
         else queueMicrotask(() => this.receive({type: 'ACQUIRE', requestId: value.requestId}));
       } else if (value.type === 'STATE') {
         queueMicrotask(() => this.receive({type: 'STATE', hubId,
-          serverTime: Date.now(), organizationId: 'org-1', locks: []}));
+          serverTime: Date.now(), organizationId: 'org-1', locks: [],
+          accounts: [], legacyAllowed: true}));
       }
     }
     close() {
@@ -122,5 +123,18 @@ test('client replays an uncertain operation with its original requestId after re
   assert.ok(sentTabs.some(({value}) => value.type === 'PT_ACTION_RESULT' &&
     value.code === 'HUB_RESTARTED'));
   assert.equal((await portal('PT_CONTENT_INIT')).view.mode, 'empty');
+  sockets[2].receive({type: 'STATE', hubId, serverTime: Date.now(),
+    organizationId: 'org-1', locks: [], legacyAllowed: false,
+    accounts: [{id: 'managed-1', portal: 'GİB', label: 'Genel A',
+      code: 'shared_A1b2C3d4E5f6'}]});
+  await new Promise((done) => setTimeout(done, 0));
+  const assigned = await portal('PT_CONTENT_INIT');
+  assert.deepEqual(assigned.accounts, [{id: 'managed-1', label: 'Genel A'}]);
+  assert.equal(assigned.view.accountCode, 'shared_A1b2C3d4E5f6'); // old code mapped, not changed
+  sockets[2].receive({type: 'STATE', hubId, serverTime: Date.now(),
+    organizationId: 'org-1', locks: [], legacyAllowed: false, accounts: []});
+  await new Promise((done) => setTimeout(done, 0));
+  assert.deepEqual((await portal('PT_CONTENT_INIT')).accounts, []);
+  assert.equal((await portal('PT_ACTION', {action: 'ACQUIRE'})).ok, false);
   assert.equal((await popup('PT_DISCONNECT')).status.phase, 'disconnected');
 });

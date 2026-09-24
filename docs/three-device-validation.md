@@ -28,6 +28,10 @@ Sonuçları tarih/saat, H/P1/P2 bilgisayar adı, Hub LAN IPv4, port, Chrome sür
 | 12 | BT gözetiminde H LAN IPv4 adresini/DHCP rezervasyonunu değiştirin; P1/P2 popup'taki adresleri yeni IP'ye güncelleyin. | Eski IP bağlantısı kesilir; yeni IP + aynı port + geçerli kodla yeniden bağlanır. Yeni IP iki personelde ayrı ayrı güncellenir. |
 | 13 | WAN/internet bağlantısını kesin, **yerel LAN'ı ve H'yi açık bırakın**. P1/P2 popup bağlantısını ve açık portal sekmelerindeki kapsülü izleyin. | Hub, yönetici paneli, kilit ve FIFO yerel ağda çalışır. Resmî portal sayfaları internet olmadan yeniden yüklenemeyebilir; bunun için sekmeleri WAN kesilmeden açın. |
 
+## Davet bağlantısı için ek fiziksel kontroller (henüz yapılmadı)
+
+H panelinde P1 ve P2 kayıtları için ayrı davetler oluşturun. Her bağlantıyı yalnızca ilgili Chrome popup'ına yapıştırın; bağlantının yerel kurulum sayfasını açmak eklentiyi kendiliğinden bağlamamalıdır. Aynı daveti iki profilde aynı anda kullanın: yalnızca biri bağlanmalı. Kullanılmış daveti tekrar, süresi geçmiş daveti de 10. dakikada deneyin. P1'de “Bu cihazı hatırla” seçip Chrome'u kapatıp açın; tekrar davet gerekmemeli. P2'de seçmeden yeniden açın; yeni davet gerekmeli. Panelden P1 cihazını iptal edin; bağlı soket kapanmalı, sıradaki kişi kilidi almalı ve iptal edilen cihaz yeniden bağlanamamalı. Atma/yeniden kabul ve kurum kodu yenileme sonrasında davet/cihaz bağlantılarını ayrıca deneyin. Eski elle bağlantı formunun da çalıştığını doğrulayın. Kurum kodu, davet URL'si, cihaz anahtarı ve personel anahtarlarını ekran görüntülerinde gizleyin.
+
 **Bakım komutları (H üzerinde yönetici PowerShell):**
 
 ```powershell
@@ -53,3 +57,7 @@ Güç ayarını Windows **Ayarlar → Sistem → Güç ve pil** bölümünden do
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -WhatIf` | `C:\Program Files\PortalTakip\PortalTakip Hub.exe` hedefi için planlanan kurulum gösterildi; gerçek Windows görevi/güvenlik duvarı değiştirilmedi. |
 
 **Fiziksel kabul bekliyor:** Bu çalışma ortamında iki ayrı personel bilgisayarı, kurulu Chrome eklentilerinin canlı portal sekmeleri ve yönetici bilgisayarını yeniden başlatma yetkisi sağlanmadı. Bu nedenle tablodaki Windows açılış görevi, iki cihazdan gerçek LAN erişimi, gerçek güvenlik duvarı/IP değişimi, WAN kesintisi ve Chrome kapsülünün görsel davranışı henüz fiziksel olarak doğrulanmadı. İnternetsiz senaryo otomatik testte yalnızca yerel HTTP/WebSocket kullanılarak kapsandı; gerçek resmî portal sayfası internet olmadan yeniden yüklenemez.
+
+## Faz 1 davet sonucu (2026-09-24)
+
+`npm.cmd test`: **28 geçti, 0 başarısız**. Yeni testler 10 dakika sınırını, davet tekrarını ve eşzamanlı kullanımını, cihaz anahtarının isteğe bağlı Chrome profil saklamasını, iptalde FIFO devrini, Hub yeniden başlamasını ve v2 ayar geçişini kapsar. `npm.cmd run extension:build` başarılıdır. Güncel kaynakla üretilen EXE üzerinde `hub:smoke-exe` davetle bağlantı, cihaz anahtarıyla yeniden bağlanma ve panel açılışını geçti. Yukarıdaki fiziksel Chrome/Windows kontrolleri hâlâ bekliyor.
