@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PortalTakip</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">P</span><div><h1>PortalTakip</h1><p>Personel bağlantısı</p></div></div>
+      <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+    </header>
+    <section class="status-card" aria-live="polite">
+      <div class="status-line"><span>BAĞLANTI</span><strong id="connectionStatus">Kontrol ediliyor…</strong></div>
+      <p id="connectionDetail">Hub durumu alınıyor.</p>
+      <div class="state-grid"><div><span>GİB</span><strong id="gibStatus">—</strong></div><div><span>SGK</span><strong id="sgkStatus">—</strong></div></div>
+    </section>
+    <form id="connectionForm" novalidate>
+      <div class="field-row">
+        <label for="displayName">Ad soyad</label>
+        <input id="displayName" name="displayName" maxlength="80" autocomplete="name" placeholder="Adınız Soyadınız" required>
+      </div>
+      <div class="field-row">
+        <label for="organizationName">Kurum adı <small>yalnızca gösterim</small></label>
+        <input id="organizationName" name="organizationName" maxlength="100" autocomplete="organization" placeholder="Muhasebe ofisi" required>
+      </div>
+      <div class="two-columns">
+        <div class="field-row"><label for="host">Hub IP / hostname</label><input id="host" name="host" spellcheck="false" autocomplete="off" placeholder="192.168.1.10" required></div>
+        <div class="field-row port"><label for="port">Port</label><input id="port" name="port" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="8787" required></div>
+      </div>
+      <p class="field-hint">Özel/yerel IP veya localhost. Kurum kodu adresi bulmaz.</p>
+      <div class="field-row"><label for="organizationCode">Kurum kodu</label><input id="organizationCode" name="organizationCode" type="password" spellcheck="false" autocomplete="off" placeholder="Yöneticinin verdiği kod" required></div>
+      <div class="field-row"><label for="staffToken">Personel erişim anahtarı</label><input id="staffToken" name="staffToken" type="password" spellcheck="false" autocomplete="off" placeholder="Size özel anahtar" required></div>
+      <div class="actions"><button id="connectButton" type="submit">Bağlan</button><button id="disconnectButton" type="button">Bağlantıyı Kes</button></div>
+    </form>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+    <footer>Kodlar bu bilgisayarda kalıcı saklanmaz. Paylaşılan profilde işiniz bitince bağlantıyı kesin.</footer>
+  </main>
+</body>
+</html>

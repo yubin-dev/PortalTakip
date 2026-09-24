@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "PortalTakip Personel",
+  "version": "0.1.0",
+  "description": "GİB ve SGK hesap erişim sırasını yerel PortalTakip Hub ile koordine eder.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "notifications", "alarms"],
+  "icons": {"128": "icons/icon128.png"},
+  "action": {"default_popup": "ui/popup.html"},
+  "background": {"service_worker": "background/client.js", "type": "module"},
+  "content_scripts": [{
+    "matches": [
+      "https://gib.gov.tr/*", "https://*.gib.gov.tr/*",
+      "https://sgk.gov.tr/*", "https://*.sgk.gov.tr/*"
+    ],
+    "js": ["content/capsule.js"],
+    "run_at": "document_idle",
+    "all_frames": false,
+    "world": "ISOLATED"
+  }]
+}

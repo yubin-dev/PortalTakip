@@ -1,0 +1,13 @@
+# Personel popup'ı (Manifest V3)
+
+`npm.cmd run extension:build` komutu yüklenebilir eklentiyi `dist/extension` altında oluşturur. Chrome `chrome://extensions` ekranında Geliştirici modu → **Paketlenmemiş öğe yükle** ile bu klasörü seçin. Manifest Chrome 116+ ister; bu sürümden itibaren WebSocket mesajları MV3 worker'ını etkin tutabilir. Popup 360×480 koyu temalıdır. Yönetici paneli, PIN ve Hub başlatma işlevi içermez.
+
+Alanlar: ad soyad, kurum adı, Hub LAN IP adresi/portu, kurum kodu ve personele özel erişim anahtarı. Son alan Hub'ın mevcut `HELLO` protokolü için zorunludur. Ad soyad ile kurum adı popup gösterimi içindir; Hub personel kimliğini ve görünen adı yöneticinin oluşturduğu erişim anahtarından doğrular. Kurum kodu bilgisayarın IP adresini çözmez: adres ve port ayrı girilir.
+
+Bağlan/Kes/Güncel durum işlemleri `chrome.runtime.sendMessage` ile `src/background/client.js` dosyasına gider (`PT_CONNECT`, `PT_DISCONNECT`, `PT_GET_STATUS`, `PT_STATUS_UPDATE`). WebSocket popup'ta açılmaz. Worker bağlandıktan sonra 20 saniyede bir geçerli `STATE` mesajı yollar; popup kapansa da bağlantı worker'da sürer. Hub erişilemezse durum kilit alınmış göstermez ve yeniden bağlanmayı dener. Bağlantı yeniden kurulduğunda Hub snapshot'ı esas alınır. Portal sekmesindeki kapsül ve ortak hesap seçimi [content README'sinde](../content/README.md) açıklanır.
+
+Adres doğrulaması yalnızca RFC1918 özel IPv4, 127/8 loopback, 169.254/16 link-local, IPv6 loopback/ULA/link-local ve `localhost` adını kabul eder. Diğer hostname'ler bu aşamada reddedilir; tarayıcı tarafında DNS sonucunun LAN'da kaldığı güvenilir biçimde doğrulanamaz. `http://`, yol, kullanıcı bilgisi ve portun adres alanına yazılması reddedilir. Port 1–65535, kod ve personel anahtarı Hub'ın 43 karakterli URL güvenli biçimiyle doğrulanır. Worker girdileri yeniden doğrular.
+
+`chrome.storage.local` yalnızca ad soyad, gösterimlik kurum adı, adres ve portu kalıcı saklar; kurum kodu ile personel anahtarı **orada saklanmaz**. Bu iki gizli değer etkin bağlantı boyunca `chrome.storage.session` belleğinde tutulur, bağlantı kesilince silinir; Chrome/eklenti yeniden başlatıldığında tekrar girilmelidir. `storage.local` ad ve adres bilgileri aynı Chrome profilini kullanan kişilerce görülebilir. Paylaşılan bilgisayarda aynı profil açıkken etkin bağlantı ve geçici kodlar da kullanılabilir; iş bitince **Bağlantıyı Kes** seçilmeli ve ayrı Chrome profilleri tercih edilmelidir. `storage.local` ve `storage.session` erişimi güvenilir eklenti bağlamlarıyla sınırlandırılır.
+
+Bağlantı varsayılan olarak `ws://` kullanır; güvenilen kurum LAN'ı içindir ve ağ üzerinde şifreli değildir. Chrome'un yerel ağa erişim istemi görülebilir; kurumsal Chrome politikaları da bağlantıyı etkileyebilir.

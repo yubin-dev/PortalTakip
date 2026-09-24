@@ -8,6 +8,18 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "hub:init": "node scripts/init-hub.js",
+    "hub:rotate-setup-key": "node scripts/rotate-setup-key.js",
+    "hub:start": "node src/hub/index.js",
+    "hub:build-exe": "node scripts/build-exe.js",
+    "hub:smoke-exe": "node scripts/smoke-exe.js",
+    "extension:build": "node scripts/build-extension.js"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

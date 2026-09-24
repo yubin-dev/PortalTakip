@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>PortalTakip · Hub yönetimi</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">PT</span><div><strong>PortalTakip</strong><span>Hub yönetimi</span></div></div>
+      <div class="topbar-right">
+        <div class="organization-label" id="organizationLabel" hidden><span>KURUM</span><strong id="headerOrganization"></strong></div>
+        <span id="hubStatus" class="status-pill status-muted" role="status"><span class="status-dot" aria-hidden="true"></span><span id="hubStatusText">Bağlanıyor</span></span>
+        <button id="logout" class="button button-quiet" type="button" hidden>Çıkış yap</button>
+      </div>
+    </header>
+
+    <main class="page">
+      <div id="message" class="notice" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+
+      <section id="setupPanel" class="auth-card" aria-labelledby="setupTitle" hidden>
+        <span class="eyebrow">İLK KURULUM</span>
+        <h1 id="setupTitle">Ofisiniz için Hub'ı hazırlayın</h1>
+        <p>Kurulum anahtarı yalnızca Hub bilgisayarındaki korunmuş <code>%ProgramData%\PortalTakip\setup-key.txt</code> dosyasındadır.</p>
+        <form id="setupForm" class="form-stack">
+          <label for="setupToken">Kurulum anahtarı</label><input id="setupToken" type="password" autocomplete="off" required>
+          <label for="organizationName">Kurum adı</label><input id="organizationName" minlength="2" maxlength="100" autocomplete="organization" required>
+          <label for="setupPassword">Yönetici parolası <span class="label-hint">En az 12 karakter</span></label><input id="setupPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+          <label for="setupPasswordAgain">Parolayı tekrar girin</label><input id="setupPasswordAgain" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+          <button class="button button-primary" type="submit">Kurulumu tamamla</button>
+        </form>
+      </section>
+
+      <section id="loginPanel" class="auth-card" aria-labelledby="loginTitle" hidden>
+        <span class="eyebrow">YEREL YÖNETİM</span>
+        <h1 id="loginTitle">Yönetici girişi</h1>
+        <p>Canlı kilitleri ve personel bağlantılarını Hub bilgisayarından yönetin.</p>
+        <form id="loginForm" class="form-stack">
+          <label for="password">Yönetici parolası</label><input id="password" type="password" autocomplete="current-password" required>
+          <button class="button button-primary" type="submit">Giriş yap</button>
+        </form>
+      </section>
+
+      <div id="adminPanel" hidden>
+        <div class="page-heading"><div><span class="eyebrow">OPERASYON EKRANI</span><h1>Canlı portal durumu</h1><p>GİB ve SGK hesap sıralarını tek ekranda izleyin.</p></div><span id="lastUpdated" class="update-label">Veri bekleniyor</span></div>
+
+        <section class="stat-grid" aria-label="Hub özeti">
+          <div class="stat-card"><span class="stat-icon icon-person" aria-hidden="true">●</span><span class="stat-label">Bağlı personel</span><strong id="connectedCount">—</strong><span class="stat-note">Şu an Hub'a bağlı</span></div>
+          <div class="stat-card"><span class="stat-icon icon-lock" aria-hidden="true">▣</span><span class="stat-label">Aktif kilit</span><strong id="activeCount">—</strong><span class="stat-note">GİB ve SGK toplamı</span></div>
+          <div class="stat-card"><span class="stat-icon icon-queue" aria-hidden="true">≡</span><span class="stat-label">Bekleyen kişi</span><strong id="waitingCount">—</strong><span class="stat-note">FIFO kuyruklarında</span></div>
+          <div class="stat-card stat-address"><span class="stat-icon icon-network" aria-hidden="true">⌁</span><span class="stat-label">Hub LAN adresi</span><strong id="lanSummary">—</strong><span id="lanSummaryNote" class="stat-note">Personel bağlantısı için</span></div>
+        </section>
+
+        <div class="workspace-grid">
+          <div class="portal-column">
+            <section class="surface portal-section" aria-labelledby="gibTitle">
+              <div class="surface-heading"><div class="heading-with-icon"><span class="portal-badge gib-badge" aria-hidden="true">G</span><div><span class="eyebrow">PORTAL DURUMU</span><h2 id="gibTitle">GİB hesapları</h2></div></div><span id="gibCount" class="count-badge">0 hesap</span></div>
+              <div id="gibLocks" class="lock-list"></div>
+            </section>
+            <section class="surface portal-section" aria-labelledby="sgkTitle">
+              <div class="surface-heading"><div class="heading-with-icon"><span class="portal-badge sgk-badge" aria-hidden="true">S</span><div><span class="eyebrow">PORTAL DURUMU</span><h2 id="sgkTitle">SGK hesapları</h2></div></div><span id="sgkCount" class="count-badge">0 hesap</span></div>
+              <div id="sgkLocks" class="lock-list"></div>
+            </section>
+            <details class="surface manual-unlock"><summary>Kodla kilit düşür <span>Listede görünmeyen bir hesap için</span></summary><form id="unlockForm" class="inline-form"><label for="portal">Portal<select id="portal"><option>GİB</option><option>SGK</option></select></label><label for="unlockAccount">Ortak hesap kodu<input id="unlockAccount" minlength="16" maxlength="128" autocomplete="off" required></label><button class="button button-danger-outline" type="submit">Kilidi düşür</button></form></details>
+          </div>
+
+          <section class="surface staff-section" aria-labelledby="staffTitle">
+            <div class="surface-heading"><div><span class="eyebrow">EKİP</span><h2 id="staffTitle">Personel</h2></div><span id="staffCount" class="count-badge">0 kayıt</span></div>
+            <p class="section-intro">Bağlantı ve erişim durumlarını izleyin. Atılan kişi tüm hesap sıralarından çıkarılır.</p>
+            <ul id="staffList" class="staff-list"></ul>
+            <div class="subsection"><h3>Yeni personel</h3><form id="staffForm" class="form-stack compact-form"><label for="staffName">Görünen ad</label><input id="staffName" maxlength="80" autocomplete="name" placeholder="Ad soyad" required><button class="button button-secondary" type="submit">Erişim anahtarı oluştur</button></form>
+              <div id="staffSecret" class="secret-result" hidden><span class="eyebrow">YALNIZCA BU OTURUMDA GÖSTERİLİR</span><strong id="secretStaffName"></strong><label for="staffToken">Personele özel anahtar</label><div class="input-actions"><input id="staffToken" type="password" readonly><button id="toggleStaffToken" class="button button-quiet" type="button" aria-pressed="false" aria-controls="staffToken">Göster</button><button id="copyStaffToken" class="button button-secondary" type="button">Anahtarı kopyala</button></div><p>Yalnızca ilgili personele güvenli yoldan iletin.</p></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="tools-grid">
+          <section class="surface connection-section" aria-labelledby="connectionTitle">
+            <div class="surface-heading"><div><span class="eyebrow">KURULUM BİLGİLERİ</span><h2 id="connectionTitle">Personel bağlantısı</h2></div></div>
+            <p class="section-intro">Eklentide Hub adresi, port ve kurum kodu ayrı alanlara girilir. Kurum kodu adresi otomatik bulmaz.</p>
+            <div class="field-grid"><label for="lanAddress">Hub LAN IPv4 adresi<div class="input-actions"><input id="lanAddress" list="lanAddresses" placeholder="Adres bulunamadı" autocomplete="off"><datalist id="lanAddresses"></datalist><button id="copyAddress" class="button button-secondary" type="button">Kopyala</button></div></label><label for="wsPort">WebSocket portu<div class="input-actions"><input id="wsPort" readonly><button id="copyPort" class="button button-secondary" type="button">Kopyala</button></div></label></div>
+            <label for="organizationCode" class="secret-label">Kurum kodu <span class="label-hint">Yalnızca oluşturulunca veya yenilenince gösterilir</span></label><div class="input-actions"><input id="organizationCode" type="password" readonly placeholder="Gizli · kayıpsa yenileyin"><button id="toggleCode" class="button button-quiet" type="button" aria-pressed="false" aria-controls="organizationCode" disabled>Göster</button><button id="copyCode" class="button button-secondary" type="button" disabled>Kodu kopyala</button></div>
+            <details class="rotate-details"><summary>Kurum kodunu yenile</summary><p>Bu işlem personelin mevcut bağlantısını keser. Yeni kodu herkese yeniden iletmeniz gerekir.</p><form id="rotateForm" class="inline-form"><label for="rotatePassword">Yönetici parolası<input id="rotatePassword" type="password" autocomplete="current-password" required></label><button class="button button-danger-outline" type="submit">Kodu yenile</button></form></details>
+          </section>
+
+          <section class="surface account-section" aria-labelledby="accountTitle">
+            <div class="surface-heading"><div><span class="eyebrow">HESAP BAZLI SIRA</span><h2 id="accountTitle">Ortak hesap kodu</h2></div></div>
+            <p class="section-intro">Aynı portal hesabıyla çalışan herkese aynı kodu verin. Farklı hesaplar için ayrı kod üretin.</p>
+            <div class="guidance"><span aria-hidden="true">i</span><p>Kod rastgele tanımlayıcıdır. Mükellef numarası, T.C. kimlik numarası veya portal şifresi girmeyin.</p></div>
+            <button id="generateAccountCode" class="button button-secondary" type="button">Yeni hesap kodu üret</button>
+            <div id="accountCodeResult" class="secret-result" hidden><span class="eyebrow">YENİ ÜRETİLEN KOD</span><label for="accountCode">Paylaşılacak ortak hesap kodu</label><div class="input-actions"><textarea id="accountCode" rows="2" spellcheck="false" readonly></textarea><button id="copyAccountCode" class="button button-primary" type="button">Bu kodu kopyala</button></div><p>Bu kodu aynı hesabı kullanan personelin hepsine aynı şekilde iletin.</p></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="confirmDialog" class="confirm-dialog" aria-labelledby="confirmTitle" aria-describedby="confirmDescription confirmTarget">
+    <span class="dialog-icon" aria-hidden="true">!</span><h2 id="confirmTitle"></h2><p id="confirmDescription"></p><div id="confirmTarget" class="confirm-target"></div>
+    <div class="dialog-actions"><button id="cancelConfirm" class="button button-secondary" type="button">Vazgeç</button><button id="confirmAction" class="button button-danger" type="button">İşlemi onayla</button></div>
+  </dialog>
+</body>
+</html>
