@@ -2,6 +2,10 @@
 
 Muhasebe ofisinde personelin aynı GİB veya SGK hesabını eşzamanlı kullanıp birbirinin oturumunu düşürmesini önlemek için planlanan yerel ağ uygulaması. Resmî portallara giriş yapmaz, şifre toplamaz ve sayfa verisi kazımaz.
 
+## Doğrulama durumu
+
+Aynı bilgisayarda iki Chrome profiliyle kilit, FIFO devir ve bildirim doğrulandı; üç fiziksel cihaz ve Windows otomatik başlangıç testi henüz yapılmadı.
+
 ## Mimari
 
 - Yönetici bilgisayarında Windows açılışında başlayabilen **PortalTakip Hub.exe** ve yalnızca yerel bilgisayara açık yönetici paneli bu repodadır.
